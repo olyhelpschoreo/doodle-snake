@@ -327,9 +327,10 @@ function updateSnake(s, dt){
   if(s.dead) return;
   if(s.isPlayer){
     if(mouse.has){
-      const wx=camera.x+(mouse.x-W/2)/camera.zoom;
-      const wy=camera.y+(mouse.y-H/2)/camera.zoom;
-      s.targetDir=Math.atan2(wy-s.y, wx-s.x);
+      // steer by the cursor's angle from screen centre (the head) — like slither.io.
+      // hold the mouse still = go straight; point it somewhere = curve that way.
+      const dx=mouse.x-W/2, dy=mouse.y-H/2;
+      if(dx*dx+dy*dy>64) s.targetDir=Math.atan2(dy,dx);   // ignore tiny cursor jitter near centre
     }
     s.boost = boosting && s.len>16 && s.boostFuel>0.04;
   } else {
@@ -685,8 +686,8 @@ function tick(now){
 
   // camera
   if(player){
-    camera.x += (player.x-camera.x)*Math.min(1, dt*8);
-    camera.y += (player.y-camera.y)*Math.min(1, dt*8);
+    camera.x += (player.x-camera.x)*Math.min(1, dt*14);
+    camera.y += (player.y-camera.y)*Math.min(1, dt*14);
     const targetZoom = clamp(1.05 - player.score*0.00018, 0.5, 1.05);
     camera.zoom += (targetZoom-camera.zoom)*Math.min(1, dt*3);
   }
