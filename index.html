@@ -337,10 +337,10 @@ function updateSnake(s, dt){
     steerAI(s, dt);
   }
 
-  // turn toward target (limited turn rate)
+  // turn toward target (limited turn rate -> smooth wide arcs like slither, no stiff elbows)
   let diff=s.targetDir - s.dir;
   while(diff>Math.PI) diff-=6.283; while(diff<-Math.PI) diff+=6.283;
-  const turn=0.13*(60*dt);
+  const turn=0.072*(60*dt);
   s.dir += clamp(diff,-turn,turn);
 
   // boost handling
@@ -686,8 +686,8 @@ function tick(now){
 
   // camera
   if(player){
-    camera.x += (player.x-camera.x)*Math.min(1, dt*14);
-    camera.y += (player.y-camera.y)*Math.min(1, dt*14);
+    camera.x = player.x;   // head locked exactly to screen centre
+    camera.y = player.y;
     const targetZoom = clamp(1.05 - player.score*0.00018, 0.5, 1.05);
     camera.zoom += (targetZoom-camera.zoom)*Math.min(1, dt*3);
   }
