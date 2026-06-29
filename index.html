@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>DOODLE SNAKE .IO</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#f6efdd;
+    font-family:'Chalkboard SE','Comic Sans MS','Marker Felt',cursive,sans-serif; }
+  #game { display:block; position:absolute; top:0; left:0; touch-action:none; cursor:crosshair; }
+
+  .overlay {
+    position:absolute; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center;
+    color:#2b2620; z-index:10; padding:24px;
+  }
+  #start    { background:radial-gradient(circle at 50% 42%, rgba(246,239,221,0.30), rgba(244,236,216,0.80)); }
+  #gameover { background:radial-gradient(circle at 50% 45%, rgba(246,239,221,0.72), rgba(244,236,216,0.90)); }
+  .hidden { display:none !important; }
+
+  /* hand-drawn box border (the classic uneven-radius trick) */
+  .doodle { border:3px solid #2b2620; border-radius:255px 15px 225px 15px/15px 225px 15px 255px; }
+
+  h1 {
+    font-size:clamp(42px,12vw,96px); letter-spacing:2px; font-weight:700; line-height:0.95;
+    color:#2b2620; text-shadow:3px 3px 0 rgba(43,38,32,0.14), 5px 5px 0 rgba(0,0,0,0.05);
+    animation:wiggle 3.2s ease-in-out infinite;
+  }
+  @keyframes wiggle { 0%,100%{transform:rotate(-1.6deg);} 50%{transform:rotate(1.6deg);} }
+  .tag { color:#c0563f; letter-spacing:3px; font-size:clamp(12px,3.4vw,17px); text-transform:lowercase; margin:14px 0 26px; font-weight:700; }
+
+  input#name {
+    font-family:inherit; font-size:18px; font-weight:700; letter-spacing:1px; text-align:center;
+    color:#2b2620; background:#fffdf6;
+    border:3px solid #2b2620; border-radius:225px 15px 255px 15px/15px 255px 15px 225px;
+    padding:12px 20px; margin-bottom:24px; width:min(280px,80vw); outline:none;
+  }
+  input#name:focus { box-shadow:3px 3px 0 rgba(43,38,32,0.18); }
+  input#name::placeholder { color:#9a9080; }
+
+  .btn {
+    position:relative; font-family:inherit; cursor:pointer; color:#2b2620;
+    background:#ffd84d; padding:15px 54px; font-size:23px; font-weight:700; letter-spacing:1px;
+    border:3px solid #2b2620; border-radius:255px 15px 225px 15px/15px 225px 15px 255px;
+    box-shadow:4px 4px 0 rgba(43,38,32,0.22);
+    transition:transform .08s, box-shadow .1s;
+  }
+  .btn:hover  { transform:translate(-1px,-2px) rotate(-1deg); box-shadow:6px 6px 0 rgba(43,38,32,0.28); }
+  .btn:active { transform:translate(2px,2px); box-shadow:1px 1px 0 rgba(43,38,32,0.22); }
+
+  .how { color:#5a5346; font-size:15px; line-height:1.9; margin-top:28px; max-width:430px; }
+  .how b { color:#c0563f; font-weight:700; }
+
+  /* ---- HUD ---- */
+  #hud { position:absolute; inset:0; z-index:5; pointer-events:none; color:#2b2620; }
+  #score {
+    position:absolute; top:14px; left:16px; font-size:14px; font-weight:700; letter-spacing:1px;
+  }
+  #score .big { font-size:34px; font-weight:700; color:#c0563f; display:block; line-height:1.05; }
+  #board {
+    position:absolute; top:14px; right:16px; min-width:172px; font-size:14px; font-weight:700;
+    background:#fffdf6; border:3px solid #2b2620;
+    border-radius:225px 12px 255px 12px/12px 255px 12px 225px; padding:11px 14px;
+  }
+  #board h3 { font-size:13px; letter-spacing:1px; color:#c0563f; margin-bottom:7px; text-transform:uppercase; font-weight:700; }
+  .row { display:flex; justify-content:space-between; gap:10px; padding:2px 0; }
+  .row .nm { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:110px; }
+  .row.me { color:#2c7a4b; }
+  .rank { color:#9a9080; margin-right:6px; }
+
+  #gameover h2 { font-size:clamp(40px,10vw,72px); font-weight:700; letter-spacing:2px; color:#c0563f;
+    text-shadow:3px 3px 0 rgba(43,38,32,0.16); margin-bottom:10px; transform:rotate(-2deg); }
+  #finalStat { font-size:19px; color:#5a5346; margin:6px 0 4px; }
+  #finalStat b { color:#2b2620; font-size:26px; }
+  #bestStat { font-size:15px; color:#7a7264; margin-bottom:28px; }
+
+  .hint { position:absolute; bottom:12px; left:0; right:0; text-align:center; color:#7a7264; font-size:13px; font-weight:700; pointer-events:none; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="score"><span class="big">1</span>LENGTH</div>
+  <div id="board"><h3>Leaderboard</h3><div id="rows"></div></div>
+  <div class="hint">MOVE&nbsp;·&nbsp;mouse / drag&nbsp;&nbsp;&nbsp;BOOST&nbsp;·&nbsp;hold click / space</div>
+</div>
+
+<div id="start" class="overlay">
+  <h1>DOODLE&nbsp;SNAKE</h1>
+  <div class="tag">~ scribble · munch · survive ~</div>
+  <input id="name" maxlength="12" placeholder="YOUR NAME" autocomplete="off" spellcheck="false">
+  <button class="btn" id="playBtn">Play</button>
+  <div class="how">
+    <b>Eat</b> the colorful orbs to grow longer.<br>
+    Make other snakes <b>crash into you</b> — then eat what's left.<br>
+    Don't hit anyone's body or the wall.<br>
+    <b>Boost</b> to chase or escape — it costs length.
+  </div>
+</div>
+
+<div id="gameover" class="overlay hidden">
+  <h2>SPLAT!</h2>
+  <div id="finalStat">Length <b>0</b></div>
+  <div id="bestStat">Best 0&nbsp;·&nbsp;Rank #—</div>
+  <button class="btn" id="againBtn">Play Again</button>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+// ---------- canvas ----------
+const cv = document.getElementById('game');
+const ctx = cv.getContext('2d');
+let W=0,H=0,DPR=1;
+let paperPat=null, torn=null;   // paper texture + torn-edge path (built during init)
+function resize(){
+  DPR = Math.min(window.devicePixelRatio||1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = W*DPR; cv.height = H*DPR;
+  cv.style.width = W+'px'; cv.style.height = H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  buildTorn();
+}
+window.addEventListener('resize', resize); resize(); buildPaper();
+
+// ---------- world ----------
+const WORLD = 4200;            // arena radius
+const FOOD_COUNT = 900;
+const BOT_COUNT = 16;
+const SEG_SPACE = 3.4;         // distance the path advances per stored point group
+const NAMES = ["Vyper","Coil","Slink","Zephyr","Nox","Echo","Rune","Blitz","Onyx","Pyx","Quill","Vex","Sable","Kilo","Wisp","Drift","Hex","Lumen","Volt","Cobra","Mamba","Specter","Jinx","Zato"];
+// crayon palette (drawn on cream paper, all get an ink outline)
+const COLORS = [
+  [70,120,205],[225,80,70],[95,175,90],[235,150,55],[150,100,190],
+  [70,175,175],[230,120,170],[225,190,70],[120,160,80],[205,90,140]
+];
+const INK = [43,38,32];
+
+let snakes=[], foods=[], particles=[], trails=[];
+let player=null, camera={x:0,y:0,zoom:1};
+let running=false, lastT=0, paused=false;
+const mouse={x:0,y:0, has:false};
+let boosting=false;
+let best = +(localStorage.getItem('ns_best')||0);
+
+// ---------- helpers ----------
+const rnd=(a,b)=>a+Math.random()*(b-a);
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const dist2=(ax,ay,bx,by)=>{const dx=ax-bx,dy=ay-by;return dx*dx+dy*dy;};
+function rgba(c,a){return `rgba(${c[0]},${c[1]},${c[2]},${a})`;}
+
+// ---------- paper grain (built once, tiled in screen space) ----------
+function buildPaper(){
+  const s=170; const oc=document.createElement('canvas'); oc.width=s; oc.height=s;
+  const o=oc.getContext('2d');
+  for(let i=0;i<1500;i++){ // pencil speckle / tooth
+    o.fillStyle='rgba(95,78,55,'+(Math.random()*0.06)+')';
+    o.fillRect(Math.random()*s, Math.random()*s, 1, 1);
+  }
+  o.strokeStyle='rgba(120,100,70,0.035)'; // faint fibers
+  for(let i=0;i<26;i++){
+    const x=Math.random()*s, y=Math.random()*s;
+    o.beginPath(); o.moveTo(x,y); o.lineTo(x+Math.random()*16-8, y+Math.random()*16-8); o.stroke();
+  }
+  paperPat=ctx.createPattern(oc,'repeat');
+}
+
+// ---------- torn-paper edge (rebuilt on resize) ----------
+function buildTorn(){
+  const pts=[], jag=15, step=24;
+  for(let x=0;x<=W;x+=step) pts.push({x, y: jag*0.35+Math.random()*jag});
+  for(let y=0;y<=H;y+=step) pts.push({x: W-(jag*0.35+Math.random()*jag), y});
+  for(let x=W;x>=0;x-=step) pts.push({x, y: H-(jag*0.35+Math.random()*jag)});
+  for(let y=H;y>=0;y-=step) pts.push({x: jag*0.35+Math.random()*jag, y});
+  torn=pts;
+}
+function drawEdges(){
+  // soft page vignette
+  const g=ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*0.34, W/2,H/2,Math.max(W,H)*0.62);
+  g.addColorStop(0,'rgba(60,50,35,0)'); g.addColorStop(1,'rgba(55,45,30,0.20)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  if(!torn) return;
+  // ragged band between screen edge and torn line = shadowed desk showing through
+  ctx.beginPath(); ctx.rect(0,0,W,H);
+  ctx.moveTo(torn[0].x,torn[0].y);
+  for(let i=1;i<torn.length;i++) ctx.lineTo(torn[i].x,torn[i].y);
+  ctx.closePath();
+  ctx.fillStyle='rgba(43,36,26,0.32)'; ctx.fill('evenodd');
+  // bright deckle highlight along the tear
+  ctx.beginPath(); ctx.moveTo(torn[0].x,torn[0].y);
+  for(let i=1;i<torn.length;i++) ctx.lineTo(torn[i].x,torn[i].y);
+  ctx.closePath();
+  ctx.lineWidth=1.5; ctx.strokeStyle='rgba(255,250,236,0.5)'; ctx.stroke();
+}
+
+// ---------- hand-drawn shape paths ----------
+function pathStar(R){ const r2=R*0.46; ctx.beginPath();
+  for(let i=0;i<10;i++){ const a=-Math.PI/2+i*0.6283185, rad=(i&1)?r2:R;
+    const x=Math.cos(a)*rad, y=Math.sin(a)*rad; i?ctx.lineTo(x,y):ctx.moveTo(x,y); }
+  ctx.closePath(); }
+function pathHeart(R){ ctx.beginPath();
+  ctx.moveTo(0, R*0.95);
+  ctx.bezierCurveTo(R*1.3, R*0.1, R*0.7, -R*0.9, 0, -R*0.25);
+  ctx.bezierCurveTo(-R*0.7, -R*0.9, -R*1.3, R*0.1, 0, R*0.95);
+  ctx.closePath(); }
+
+function spawnFood(x,y,val,color){
+  foods.push({
+    x: x!=null?x:rnd(-WORLD*0.96,WORLD*0.96),
+    y: y!=null?y:rnd(-WORLD*0.96,WORLD*0.96),
+    r: val? clamp(2.6+val*0.6,3,9) : rnd(3,5),
+    val: val||1,
+    c: color || COLORS[(Math.random()*COLORS.length)|0],
+    ph: Math.random()*6.28,
+    shape: ['circle','circle','star','heart','x','tri','sprinkle'][(Math.random()*7)|0]
+  });
+}
+function fillFood(){ while(foods.length<FOOD_COUNT) spawnFood(); }
+
+// ---------- snake ----------
+function makeSnake(isPlayer, name, color){
+  const ang = rnd(0,6.28), R = rnd(300, WORLD*0.7);
+  const x = Math.cos(ang)*R, y = Math.sin(ang)*R;
+  const s = {
+    isPlayer, name, c: color,
+    x, y, dir: rnd(0,6.28), targetDir: 0,
+    speed: 2.5, len: 14, score: 0,
+    pts: [], dead:false,
+    boost:false, boostFuel:1,
+    ai:{ state:'food', t:0, wander:rnd(0,6.28) }
+  };
+  for(let i=0;i<60;i++) s.pts.push({x:x - Math.cos(s.dir)*i*SEG_SPACE, y:y - Math.sin(s.dir)*i*SEG_SPACE});
+  s.targetDir = s.dir;
+  return s;
+}
+function radiusOf(s){ return 6 + Math.min(s.score,2000)*0.013; }
+function segCount(s){ return Math.floor(s.len); }
+
+function killSnake(s){
+  if(s.dead) return;
+  s.dead = true;
+  // scatter food along the body
+  const step = Math.max(1, Math.floor(s.pts.length/ Math.min(s.pts.length, 70)));
+  for(let i=0;i<s.pts.length;i+=step){
+    const p=s.pts[i];
+    spawnFood(p.x+rnd(-8,8), p.y+rnd(-8,8), rnd(2,5), s.c);
+  }
+  burst(s.x,s.y,s.c,26);
+}
+
+// ---------- particles ----------
+function burst(x,y,c,n){
+  for(let i=0;i<n;i++){
+    const a=rnd(0,6.28),sp=rnd(0.5,4);
+    particles.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:1,c});
+  }
+}
+
+// ---------- input ----------
+cv.addEventListener('mousemove',e=>{ mouse.x=e.clientX; mouse.y=e.clientY; mouse.has=true; });
+cv.addEventListener('mousedown',e=>{ if(e.button===0) boosting=true; });
+window.addEventListener('mouseup',e=>{ if(e.button===0) boosting=false; });
+window.addEventListener('keydown',e=>{ if(e.code==='Space'){boosting=true; e.preventDefault();} });
+window.addEventListener('keyup',e=>{ if(e.code==='Space') boosting=false; });
+// touch
+cv.addEventListener('touchstart',e=>{ const t=e.touches[0]; mouse.x=t.clientX; mouse.y=t.clientY; mouse.has=true; boosting=true; e.preventDefault(); },{passive:false});
+cv.addEventListener('touchmove',e=>{ const t=e.touches[0]; mouse.x=t.clientX; mouse.y=t.clientY; mouse.has=true; e.preventDefault(); },{passive:false});
+window.addEventListener('touchend',()=>{ boosting=false; });
+
+// ---------- AI ----------
+function steerAI(s, dt){
+  const a=s.ai; a.t-=dt;
+  const r = radiusOf(s);
+  // sense nearest threat (other snake bodies near head) and nearest food
+  let bestFood=null, bf=1e9;
+  const senseR2 = 520*520;
+  for(let i=0;i<foods.length;i++){
+    const f=foods[i]; const d=dist2(s.x,s.y,f.x,f.y);
+    if(d<bf && d<senseR2){ bf=d; bestFood=f; }
+  }
+  // threat avoidance: look ahead, if a body is close, turn away
+  let avoid=null, av=1e9;
+  const ahead=170;
+  const hx=s.x+Math.cos(s.dir)*ahead, hy=s.y+Math.sin(s.dir)*ahead;
+  for(let k=0;k<snakes.length;k++){
+    const o=snakes[k]; if(o===s||o.dead) continue;
+    const op=o.pts; const st=Math.max(1,(op.length/24)|0);
+    for(let i=0;i<op.length;i+=st){
+      const d=dist2(hx,hy,op[i].x,op[i].y);
+      if(d<av && d< 230*230){ av=d; avoid=op[i]; }
+    }
+  }
+  let desired=s.dir;
+  if(avoid){
+    const aw=Math.atan2(s.y-avoid.y, s.x-avoid.x);
+    desired=aw;
+    // sometimes try to cut in front of the player (aggression)
+  } else if(bestFood){
+    desired=Math.atan2(bestFood.y-s.y, bestFood.x-s.x);
+    // occasionally hunt the player by aiming ahead of them
+    if(player && !player.dead && Math.random()<0.012){
+      const pd=dist2(s.x,s.y,player.x,player.y);
+      if(pd< 700*700){
+        const lead=120;
+        desired=Math.atan2(player.y+Math.sin(player.dir)*lead - s.y, player.x+Math.cos(player.dir)*lead - s.x);
+      }
+    }
+  } else {
+    if(a.t<=0){ a.wander+=rnd(-0.8,0.8); a.t=rnd(0.6,1.6); }
+    desired=a.wander;
+  }
+  // wall avoidance
+  const distC=Math.hypot(s.x,s.y);
+  if(distC > WORLD-260){
+    desired=Math.atan2(-s.y,-s.x);
+  }
+  s.targetDir=desired;
+  // boost sometimes when chasing or fleeing
+  s.boost = (avoid && av<150*150 && s.boostFuel>0.25) || (s.score>40 && Math.random()<0.004 && s.boostFuel>0.5);
+}
+
+// ---------- update ----------
+function updateSnake(s, dt){
+  if(s.dead) return;
+  if(s.isPlayer){
+    if(mouse.has){
+      const wx=camera.x+(mouse.x-W/2)/camera.zoom;
+      const wy=camera.y+(mouse.y-H/2)/camera.zoom;
+      s.targetDir=Math.atan2(wy-s.y, wx-s.x);
+    }
+    s.boost = boosting && s.len>16 && s.boostFuel>0.04;
+  } else {
+    steerAI(s, dt);
+  }
+
+  // turn toward target (limited turn rate)
+  let diff=s.targetDir - s.dir;
+  while(diff>Math.PI) diff-=6.283; while(diff<-Math.PI) diff+=6.283;
+  const turn=0.13*(60*dt);
+  s.dir += clamp(diff,-turn,turn);
+
+  // boost handling
+  let sp=s.speed;
+  if(s.boost){
+    sp*=1.9;
+    s.boostFuel-=dt*0.55;
+    s.len=Math.max(14, s.len - dt*7);    // boosting burns length
+    if(s.boostFuel<=0){ s.boost=false; s.boostFuel=0; }
+    if(Math.random()<0.4) spawnFood(s.x-Math.cos(s.dir)*8, s.y-Math.sin(s.dir)*8, 1, s.c);
+    // scribbly pencil speed-trail, streaming off the tail
+    if(trails.length<320){
+      const ti=Math.min(s.pts.length-1, (s.len*2|0)+4);
+      const tp=s.pts[ti]||s.pts[s.pts.length-1];
+      trails.push({ x:tp.x+rnd(-3,3), y:tp.y+rnd(-3,3), ang:s.dir,
+        c:s.c, r:radiusOf(s), life:1, seed:Math.random()*99 });
+    }
+  } else {
+    s.boostFuel=Math.min(1, s.boostFuel+dt*0.22);
+  }
+
+  const move=sp*(60*dt);
+  s.x+=Math.cos(s.dir)*move;
+  s.y+=Math.sin(s.dir)*move;
+
+  // advance path: push head point, keep spacing
+  const head=s.pts[0];
+  if(dist2(s.x,s.y,head.x,head.y) > SEG_SPACE*SEG_SPACE){
+    s.pts.unshift({x:s.x,y:s.y});
+  } else { head.x=s.x; head.y=s.y; }
+  const need=Math.floor(s.len*2.0)+8;
+  if(s.pts.length>need) s.pts.length=need;
+
+  // wall death
+  if(Math.hypot(s.x,s.y) > WORLD){
+    if(s.isPlayer){ killSnake(s); return; }
+    else { killSnake(s); return; }
+  }
+
+  // eat food
+  const r=radiusOf(s), eatR=(r+13);
+  for(let i=foods.length-1;i>=0;i--){
+    const f=foods[i];
+    if(dist2(s.x,s.y,f.x,f.y) < eatR*eatR){
+      s.score+=f.val; s.len+=f.val*0.9;
+      if(s.isPlayer) burst(f.x,f.y,f.c,4);
+      foods[i]=foods[foods.length-1]; foods.pop();
+    }
+  }
+}
+
+// head vs bodies collision; the snake whose HEAD hits a foreign body dies
+function collisions(){
+  for(let a=0;a<snakes.length;a++){
+    const s=snakes[a]; if(s.dead) continue;
+    const r=radiusOf(s);
+    for(let b=0;b<snakes.length;b++){
+      if(b===a) continue;
+      const o=snakes[b]; if(o.dead) continue;
+      const or=radiusOf(o);
+      const hitD=(r+or)*0.78; const hitD2=hitD*hitD;
+      const op=o.pts; const st=Math.max(1,(op.length/40)|0);
+      for(let i=2;i<op.length;i+=st){
+        if(dist2(s.x,s.y,op[i].x,op[i].y) < hitD2){
+          killSnake(s); break;
+        }
+      }
+      if(s.dead) break;
+    }
+  }
+}
+
+// ---------- render ----------
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  // paper background + pencil grain (screen-space, under the world)
+  ctx.fillStyle='#f6efdd'; ctx.fillRect(0,0,W,H);
+  if(paperPat){ ctx.fillStyle=paperPat; ctx.fillRect(0,0,W,H); }
+
+  ctx.save();
+  ctx.translate(W/2,H/2);
+  ctx.scale(camera.zoom,camera.zoom);
+  ctx.translate(-camera.x,-camera.y);
+
+  // notebook grid
+  drawGrid();
+
+  // arena wall — wobbly red marker circle
+  ctx.lineCap='round';
+  ctx.beginPath();
+  for(let a=0;a<=64;a++){
+    const ang=a/64*6.2832;
+    const wob=Math.sin(ang*9)*7;
+    const x=Math.cos(ang)*(WORLD+wob), y=Math.sin(ang)*(WORLD+wob);
+    if(a===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.strokeStyle='#c0563f'; ctx.lineWidth=6; ctx.setLineDash([26,16]); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // food — hand-drawn crayon shapes
+  const t=performance.now()*0.004;
+  for(let i=0;i<foods.length;i++){
+    const f=foods[i];
+    if(!inView(f.x,f.y,40)) continue;
+    const pr=f.r*(0.85+0.18*Math.sin(t+f.ph));
+    ctx.save(); ctx.translate(f.x,f.y); ctx.lineJoin='round'; ctx.lineCap='round';
+    const sh=f.shape;
+    if(sh==='x'){
+      const R=pr*1.2; ctx.lineWidth=Math.max(2,pr*0.55); ctx.strokeStyle=rgba(f.c,1);
+      ctx.beginPath(); ctx.moveTo(-R,-R); ctx.lineTo(R,R); ctx.moveTo(R,-R); ctx.lineTo(-R,R); ctx.stroke();
+    } else if(sh==='sprinkle'){
+      const R=pr*1.5; ctx.rotate(f.ph); ctx.lineWidth=Math.max(2.5,pr*0.9); ctx.strokeStyle=rgba(f.c,1);
+      ctx.beginPath(); ctx.moveTo(-R,0); ctx.lineTo(R,0); ctx.stroke();
+    } else {
+      if(sh==='star') pathStar(pr*1.45);
+      else if(sh==='heart') pathHeart(pr*1.2);
+      else if(sh==='tri'){ const R=pr*1.4; ctx.beginPath();
+        for(let k=0;k<3;k++){ const a=-Math.PI/2+k*2.0944, x=Math.cos(a)*R, y=Math.sin(a)*R; k?ctx.lineTo(x,y):ctx.moveTo(x,y);} ctx.closePath(); }
+      else { ctx.beginPath(); ctx.arc(0,0,pr,0,6.2832); }
+      ctx.fillStyle=rgba(f.c,1); ctx.fill();
+      ctx.lineWidth=1.6; ctx.strokeStyle=rgba(INK,0.85); ctx.stroke();
+      ctx.beginPath(); ctx.arc(-pr*0.3,-pr*0.3,Math.max(1,pr*0.22),0,6.2832);
+      ctx.fillStyle='rgba(255,255,255,0.7)'; ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // boost trails (under the snakes)
+  ctx.lineCap='round';
+  for(let i=0;i<trails.length;i++){
+    const tr=trails[i];
+    if(!inView(tr.x,tr.y,60)) continue;
+    const ca=Math.cos(tr.ang), sa=Math.sin(tr.ang), nx=-sa, ny=ca;
+    ctx.strokeStyle=rgba(tr.c, tr.life*0.5); ctx.lineWidth=Math.max(1.5,tr.r*0.42);
+    ctx.beginPath();
+    const len=tr.r*2.6, amp=tr.r*0.85, N=5;
+    for(let k=0;k<=N;k++){
+      const t=k/N, along=-t*len, side=Math.sin(t*9+tr.seed)*amp*(1-t*0.4);
+      const x=tr.x+ca*along+nx*side, y=tr.y+sa*along+ny*side;
+      k?ctx.lineTo(x,y):ctx.moveTo(x,y);
+    }
+    ctx.stroke();
+  }
+
+  // snakes (draw player last so it's on top)
+  const order=snakes.slice().sort((a,b)=> (a.isPlayer?1:0)-(b.isPlayer?1:0));
+  for(const s of order){ if(!s.dead) drawSnake(s); }
+
+  // particles
+  for(const p of particles){
+    ctx.globalAlpha=p.life; ctx.beginPath(); ctx.arc(p.x,p.y,2.6,0,6.2832);
+    ctx.fillStyle=rgba(p.c,1); ctx.fill();
+  }
+  ctx.globalAlpha=1;
+
+  ctx.restore();
+  drawEdges();
+  drawMinimap();
+}
+
+function inView(x,y,pad){
+  const sx=(x-camera.x)*camera.zoom+W/2;
+  const sy=(y-camera.y)*camera.zoom+H/2;
+  return sx>-pad && sx<W+pad && sy>-pad && sy<H+pad;
+}
+
+function drawGrid(){
+  const g=46;
+  const x0=camera.x-W/2/camera.zoom, x1=camera.x+W/2/camera.zoom;
+  const y0=camera.y-H/2/camera.zoom, y1=camera.y+H/2/camera.zoom;
+  const step=58;                                  // wave segment length (world px)
+  const wob=(v,k)=>Math.sin(v*0.016+k*0.5)*2.4;   // gentle pencil wave, stable in world space
+  ctx.lineCap='round';
+  // faint blue notebook squares (hand-drawn wobble)
+  ctx.strokeStyle='rgba(92,138,198,0.15)'; ctx.lineWidth=1.1/camera.zoom;
+  ctx.beginPath();
+  for(let x=Math.floor(x0/g)*g; x<x1; x+=g){ let f=1;
+    for(let y=y0; y<=y1; y+=step){ const xx=x+wob(y,x); f?(ctx.moveTo(xx,y),f=0):ctx.lineTo(xx,y); } }
+  for(let y=Math.floor(y0/g)*g; y<y1; y+=g){ let f=1;
+    for(let x=x0; x<=x1; x+=step){ const yy=y+wob(x,y); f?(ctx.moveTo(x,yy),f=0):ctx.lineTo(x,yy); } }
+  ctx.stroke();
+  // heavier lines every 5 squares
+  const G=g*5;
+  ctx.strokeStyle='rgba(92,138,198,0.24)'; ctx.lineWidth=1.5/camera.zoom;
+  ctx.beginPath();
+  for(let x=Math.floor(x0/G)*G; x<x1; x+=G){ let f=1;
+    for(let y=y0; y<=y1; y+=step){ const xx=x+wob(y,x); f?(ctx.moveTo(xx,y),f=0):ctx.lineTo(xx,y); } }
+  for(let y=Math.floor(y0/G)*G; y<y1; y+=G){ let f=1;
+    for(let x=x0; x<=x1; x+=step){ const yy=y+wob(x,y); f?(ctx.moveTo(x,yy),f=0):ctx.lineTo(x,yy); } }
+  ctx.stroke();
+}
+
+function drawSnake(s){
+  const r=radiusOf(s);
+  const pts=s.pts;
+  if(pts.length<2) return;
+  const c=s.c;
+  ctx.lineCap='round'; ctx.lineJoin='round';
+
+  // build a hand-drawn wobbled path (wobble fixed in world space, so it doesn't shimmer)
+  const maxSeg=Math.min(pts.length, Math.floor(s.len*2)+6);
+  const path=[];
+  for(let i=0;i<maxSeg;i++){
+    const p=pts[i];
+    path.push({ x:p.x+Math.sin(p.y*0.045+p.x*0.012)*2.7, y:p.y+Math.cos(p.x*0.045+p.y*0.012)*2.7 });
+  }
+  const trace=(dx,dy)=>{ ctx.beginPath(); ctx.moveTo(path[0].x+(dx||0),path[0].y+(dy||0));
+    for(let i=1;i<path.length;i++) ctx.lineTo(path[i].x+(dx||0),path[i].y+(dy||0)); };
+
+  // sketchy ink outline: same shape stroked a few times with tiny offsets -> rough hand-inked edge
+  ctx.strokeStyle=rgba(INK,0.55); ctx.lineWidth=r*2+5;
+  trace(0,0); ctx.stroke();
+  trace(1.0,0.8); ctx.stroke();
+  trace(-0.9,0.6); ctx.stroke();
+  // crayon body
+  trace(0,0); ctx.strokeStyle=rgba(c,1); ctx.lineWidth=r*2; ctx.stroke();
+  // top-light shine (offset up-left like a drawn highlight)
+  trace(-0.7,-0.9); ctx.strokeStyle='rgba(255,255,255,0.16)'; ctx.lineWidth=r*0.8; ctx.stroke();
+
+  // drawn belly scales — little curved cross-ticks down the body
+  ctx.strokeStyle=rgba(INK,0.30); ctx.lineWidth=1.5;
+  const w=r*0.82;
+  for(let i=5;i<path.length-2;i+=4){
+    const a=Math.atan2(path[i+1].y-path[i-1].y, path[i+1].x-path[i-1].x);
+    const nx=-Math.sin(a), ny=Math.cos(a), tx=Math.cos(a), ty=Math.sin(a);
+    ctx.beginPath();
+    ctx.moveTo(path[i].x-nx*w, path[i].y-ny*w);
+    ctx.quadraticCurveTo(path[i].x+tx*3.5, path[i].y+ty*3.5, path[i].x+nx*w, path[i].y+ny*w);
+    ctx.stroke();
+  }
+
+  // head
+  const h=path[0];
+  const ex=Math.cos(s.dir), ey=Math.sin(s.dir);
+  const px=-ey, py=ex;
+  const hr=r*1.25;
+
+  // flicking forked tongue
+  const flick=Math.sin(performance.now()*0.006 + s.x*0.05);
+  if(flick>0.45){
+    const bx=h.x+ex*hr*0.9, by=h.y+ey*hr*0.9;
+    const tl=hr*1.5, fx=bx+ex*tl, fy=by+ey*tl;
+    ctx.strokeStyle='#d23a3a'; ctx.lineWidth=Math.max(1.8,r*0.22);
+    ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(fx,fy);
+    ctx.moveTo(fx,fy); ctx.lineTo(fx+ex*5+px*5, fy+ey*5+py*5);
+    ctx.moveTo(fx,fy); ctx.lineTo(fx+ex*5-px*5, fy+ey*5-py*5);
+    ctx.stroke();
+  }
+
+  // sketchy head outline + crayon fill
+  ctx.strokeStyle=rgba(INK,0.55); ctx.lineWidth=2.4;
+  for(const o of [[0,0],[1.0,0.8],[-0.8,0.7]]){
+    ctx.beginPath(); ctx.arc(h.x+o[0],h.y+o[1],hr,0,6.2832); ctx.stroke();
+  }
+  ctx.beginPath(); ctx.arc(h.x,h.y,hr,0,6.2832); ctx.fillStyle=rgba(c,1); ctx.fill();
+
+  // googly eyes
+  for(const sgn of [-1,1]){
+    const exx=h.x+ex*r*0.3+px*sgn*r*0.62, eyy=h.y+ey*r*0.3+py*sgn*r*0.62;
+    ctx.beginPath(); ctx.arc(exx,eyy,r*0.5,0,6.2832); ctx.fillStyle='#fff'; ctx.fill();
+    ctx.lineWidth=1.8; ctx.strokeStyle=rgba(INK,0.9); ctx.stroke();
+    ctx.beginPath(); ctx.arc(exx+ex*r*0.22,eyy+ey*r*0.22,r*0.24,0,6.2832); ctx.fillStyle='#2b2620'; ctx.fill();
+  }
+
+  // name in marker font
+  if(camera.zoom>0.34){
+    ctx.font="700 14px 'Chalkboard SE','Comic Sans MS',cursive"; ctx.textAlign='center';
+    ctx.lineWidth=3; ctx.strokeStyle='rgba(246,239,221,0.9)';
+    ctx.strokeText(s.name, h.x, h.y - hr - 8);
+    ctx.fillStyle=rgba(INK,0.85);
+    ctx.fillText(s.name, h.x, h.y - hr - 8);
+  }
+}
+
+function drawMinimap(){
+  const size=Math.min(W,H)*0.16, pad=14;
+  const ox=W-size-pad, oy=H-size-pad;
+  ctx.save();
+  ctx.fillStyle='#fffdf6';
+  ctx.beginPath(); ctx.arc(ox+size/2,oy+size/2,size/2,0,6.2832); ctx.fill();
+  ctx.strokeStyle='#c0563f'; ctx.lineWidth=3; ctx.setLineDash([7,5]); ctx.stroke(); ctx.setLineDash([]);
+  const sc=(size/2)/WORLD;
+  const cx=ox+size/2, cy=oy+size/2;
+  for(const s of snakes){
+    if(s.dead) continue;
+    ctx.beginPath();
+    ctx.arc(cx+s.x*sc, cy+s.y*sc, s.isPlayer?3.6:2.4, 0,6.2832);
+    ctx.fillStyle = s.isPlayer? '#2c7a4b' : rgba(s.c,1);
+    ctx.fill();
+    if(s.isPlayer){ ctx.lineWidth=1.4; ctx.strokeStyle=rgba(INK,0.8); ctx.stroke(); }
+  }
+  ctx.restore();
+}
+
+// ---------- HUD ----------
+const hud=document.getElementById('hud');
+const scoreEl=document.querySelector('#score .big');
+const rowsEl=document.getElementById('rows');
+let hudT=0;
+function updateHUD(dt){
+  scoreEl.textContent = player&&!player.dead ? Math.floor(player.len) : Math.floor(player?player.len:0);
+  hudT-=dt; if(hudT>0) return; hudT=0.25;
+  const live=snakes.filter(s=>!s.dead).sort((a,b)=>b.score-a.score);
+  let html='';
+  const top=live.slice(0,5);
+  top.forEach((s,i)=>{
+    html+=`<div class="row ${s.isPlayer?'me':''}"><span class="nm"><span class="rank">${i+1}</span>${esc(s.name)}</span><span>${Math.floor(s.len)}</span></div>`;
+  });
+  if(player && !player.dead && top.indexOf(player)<0){
+    const rank=live.indexOf(player)+1;
+    html+=`<div class="row me"><span class="nm"><span class="rank">${rank}</span>${esc(player.name)}</span><span>${Math.floor(player.len)}</span></div>`;
+  }
+  rowsEl.innerHTML=html;
+}
+function esc(s){return s.replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));}
+
+// ---------- loop ----------
+function tick(now){
+  if(!running){ return; }
+  const dt=Math.min(0.05,(now-lastT)/1000)||0.016; lastT=now;
+
+  for(const s of snakes) updateSnake(s, dt);
+  collisions();
+
+  // particles
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i]; p.x+=p.vx; p.y+=p.vy; p.vx*=0.92; p.vy*=0.92; p.life-=dt*1.6;
+    if(p.life<=0){ particles[i]=particles[particles.length-1]; particles.pop(); }
+  }
+  // boost trails fade out
+  for(let i=trails.length-1;i>=0;i--){
+    trails[i].life-=dt*1.7;
+    if(trails[i].life<=0){ trails[i]=trails[trails.length-1]; trails.pop(); }
+  }
+
+  // respawn dead bots to keep arena full
+  for(let i=0;i<snakes.length;i++){
+    if(snakes[i].dead && !snakes[i].isPlayer){
+      snakes[i]=makeSnake(false, NAMES[(Math.random()*NAMES.length)|0], COLORS[(Math.random()*COLORS.length)|0]);
+    }
+  }
+  fillFood();
+
+  // camera
+  if(player){
+    camera.x += (player.x-camera.x)*Math.min(1, dt*8);
+    camera.y += (player.y-camera.y)*Math.min(1, dt*8);
+    const targetZoom = clamp(1.05 - player.score*0.00018, 0.5, 1.05);
+    camera.zoom += (targetZoom-camera.zoom)*Math.min(1, dt*3);
+  }
+
+  draw();
+  updateHUD(dt);
+
+  if(player && player.dead){ endGame(); return; }
+  requestAnimationFrame(tick);
+}
+
+// ---------- game flow ----------
+function startGame(){
+  const nm=(document.getElementById('name').value||'').trim().slice(0,12) || 'YOU';
+  snakes=[]; foods=[]; particles=[]; trails=[];
+  player=makeSnake(true, nm, COLORS[0]);
+  snakes.push(player);
+  for(let i=0;i<BOT_COUNT;i++){
+    snakes.push(makeSnake(false, NAMES[i%NAMES.length], COLORS[(i+1)%COLORS.length]));
+  }
+  fillFood();
+  camera.x=player.x; camera.y=player.y; camera.zoom=1.05;
+  document.getElementById('start').classList.add('hidden');
+  document.getElementById('gameover').classList.add('hidden');
+  hud.classList.remove('hidden');
+  running=true; lastT=performance.now();
+  requestAnimationFrame(tick);
+}
+
+function endGame(){
+  running=false;
+  const score=Math.floor(player.len);
+  const live=snakes.filter(s=>!s.dead || s===player).sort((a,b)=>b.score-a.score);
+  const rank=live.indexOf(player)+1 || '—';
+  if(score>best){ best=score; localStorage.setItem('ns_best',best); }
+  document.getElementById('finalStat').innerHTML=`Length <b>${score}</b>`;
+  document.getElementById('bestStat').innerHTML=`Best ${best}&nbsp;·&nbsp;Rank #${rank} of ${snakes.length}`;
+  hud.classList.add('hidden');
+  document.getElementById('gameover').classList.remove('hidden');
+}
+
+document.getElementById('playBtn').addEventListener('click', startGame);
+document.getElementById('againBtn').addEventListener('click', startGame);
+document.getElementById('name').addEventListener('keydown',e=>{ if(e.key==='Enter') startGame(); });
+
+})();
+</script>
+</body>
+</html>
