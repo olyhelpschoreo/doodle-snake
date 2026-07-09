@@ -139,7 +139,8 @@ const COLORS = [
 ];
 const INK = [43,38,32];
 
-let snakes=[], foods=[], particles=[], trails=[];
+let snakes=[], foods=[], particles=[], trails=[], corpses=[], rings=[];
+let shake=0, deathT=null;   // screen shake + short beat before the game-over screen
 let player=null, camera={x:0,y:0,zoom:1};
 let running=false, lastT=0, paused=false;
 const mouse={x:0,y:0, has:false};
@@ -242,13 +243,17 @@ function segCount(s){ return Math.floor(s.len); }
 function killSnake(s){
   if(s.dead) return;
   s.dead = true;
-  // scatter food along the body
+  // body becomes a corpse that visibly breaks apart into food, head -> tail
   const step = Math.max(1, Math.floor(s.pts.length/ Math.min(s.pts.length, 70)));
-  for(let i=0;i<s.pts.length;i+=step){
-    const p=s.pts[i];
-    spawnFood(p.x+rnd(-8,8), p.y+rnd(-8,8), rnd(2,5), s.c);
-  }
+  const segs=[];
+  for(let i=0;i<s.pts.length;i+=step) segs.push({x:s.pts[i].x, y:s.pts[i].y, popped:false});
+  corpses.push({segs, c:s.c, r:radiusOf(s), t:0, dur:0.55});
+  // flash ring at the head
+  rings.push({x:s.x, y:s.y, r:radiusOf(s)*1.4, life:1, c:s.c});
   burst(s.x,s.y,s.c,26);
+  // shake if it happened near the player
+  if(player && !player.dead && dist2(s.x,s.y,player.x,player.y) < 650*650) shake=Math.min(14, shake+9);
+  if(s.isPlayer) shake=16;
 }
 
 // ---------- particles ----------
@@ -422,7 +427,7 @@ function draw(){
   if(paperPat){ ctx.fillStyle=paperPat; ctx.fillRect(0,0,W,H); }
 
   ctx.save();
-  ctx.translate(W/2,H/2);
+  ctx.translate(W/2+(Math.random()-0.5)*shake, H/2+(Math.random()-0.5)*shake);
   ctx.scale(camera.zoom,camera.zoom);
   ctx.translate(-camera.x,-camera.y);
 
@@ -467,6 +472,28 @@ function draw(){
       ctx.fillStyle='rgba(255,255,255,0.7)'; ctx.fill();
     }
     ctx.restore();
+  }
+
+  // corpses breaking apart (under everything else)
+  for(const co of corpses){
+    const n=co.segs.length;
+    for(let k=0;k<n;k++){
+      const seg=co.segs[k]; if(seg.popped) continue;
+      if(!inView(seg.x,seg.y,40)) continue;
+      const popT=(k/n)*co.dur;                                  // this segment pops at popT
+      const remain=clamp(1-(co.t/Math.max(popT,0.001))*0.45, 0.4, 1); // shrink as its pop nears
+      ctx.beginPath(); ctx.arc(seg.x,seg.y,co.r*remain,0,6.2832);
+      ctx.fillStyle=rgba(co.c,0.9); ctx.fill();
+      ctx.lineWidth=1.6; ctx.strokeStyle=rgba(INK,0.7); ctx.stroke();
+    }
+  }
+  // death flash rings
+  for(const g of rings){
+    if(!inView(g.x,g.y,g.r+20)) continue;
+    ctx.beginPath(); ctx.arc(g.x,g.y,g.r,0,6.2832);
+    ctx.lineWidth=3.5; ctx.strokeStyle=rgba(g.c,g.life*0.75); ctx.stroke();
+    ctx.beginPath(); ctx.arc(g.x,g.y,g.r*0.7,0,6.2832);
+    ctx.lineWidth=2; ctx.strokeStyle=rgba(INK,g.life*0.35); ctx.stroke();
   }
 
   // boost trails (under the snakes)
@@ -676,6 +703,26 @@ function tick(now){
     trails[i].life-=dt*1.7;
     if(trails[i].life<=0){ trails[i]=trails[trails.length-1]; trails.pop(); }
   }
+  // corpses break apart into food, head -> tail
+  for(let i=corpses.length-1;i>=0;i--){
+    const co=corpses[i]; co.t+=dt;
+    const n=co.segs.length;
+    for(let k=0;k<n;k++){
+      const seg=co.segs[k];
+      if(!seg.popped && co.t >= (k/n)*co.dur){
+        seg.popped=true;
+        spawnFood(seg.x+rnd(-8,8), seg.y+rnd(-8,8), rnd(2,5), co.c);
+      }
+    }
+    if(co.t>=co.dur){ corpses[i]=corpses[corpses.length-1]; corpses.pop(); }
+  }
+  // death flash rings
+  for(let i=rings.length-1;i>=0;i--){
+    const g=rings[i]; g.life-=dt*2.2; g.r+=dt*300;
+    if(g.life<=0){ rings[i]=rings[rings.length-1]; rings.pop(); }
+  }
+  // screen shake decay
+  shake*=Math.max(0, 1-dt*6);
 
   // respawn dead bots to keep arena full
   for(let i=0;i<snakes.length;i++){
@@ -698,14 +745,20 @@ function tick(now){
   draw();
   updateHUD(dt);
 
-  if(player && player.dead){ endGame(); return; }
+  // short beat after dying so you see your snake break apart before the overlay
+  if(player && player.dead){
+    if(deathT===null) deathT=0.9;
+    deathT-=dt;
+    if(deathT<=0){ endGame(); return; }
+  }
   requestAnimationFrame(tick);
 }
 
 // ---------- game flow ----------
 function startGame(){
   const nm=(document.getElementById('name').value||'').trim().slice(0,12) || 'YOU';
-  snakes=[]; foods=[]; particles=[]; trails=[];
+  snakes=[]; foods=[]; particles=[]; trails=[]; corpses=[]; rings=[];
+  shake=0; deathT=null;
   player=makeSnake(true, nm, COLORS[0]);
   snakes.push(player);
   for(let i=0;i<BOT_COUNT;i++){
