@@ -48,6 +48,9 @@
   }
   .btn:hover  { transform:translate(-1px,-2px) rotate(-1deg); box-shadow:6px 6px 0 rgba(43,38,32,0.28); }
   .btn:active { transform:translate(2px,2px); box-shadow:1px 1px 0 rgba(43,38,32,0.22); }
+  /* secondary (Main Menu) — lighter so Play Again stays the primary action */
+  .btn.ghost { background:#fffdf6; color:#5a5346; font-size:18px; padding:11px 40px;
+    margin-top:14px; box-shadow:3px 3px 0 rgba(43,38,32,0.18); }
 
   .how { color:#5a5346; font-size:15px; line-height:1.9; margin-top:28px; max-width:430px; }
   .how b { color:#c0563f; font-weight:700; }
@@ -105,6 +108,7 @@
   <div id="finalStat">Length <b>0</b></div>
   <div id="bestStat">Best 0&nbsp;·&nbsp;Rank #—</div>
   <button class="btn" id="againBtn">Play Again</button>
+  <button class="btn ghost" id="menuBtn">Main Menu</button>
 </div>
 
 <script>
@@ -860,8 +864,15 @@ function endGame(){
   document.getElementById('gameover').classList.remove('hidden');
 }
 
+function toMenu(){
+  running=false;
+  document.getElementById('gameover').classList.add('hidden');
+  hud.classList.add('hidden');
+  document.getElementById('start').classList.remove('hidden');
+}
 document.getElementById('playBtn').addEventListener('click', startGame);
 document.getElementById('againBtn').addEventListener('click', startGame);
+document.getElementById('menuBtn').addEventListener('click', toMenu);
 document.getElementById('name').addEventListener('keydown',e=>{ if(e.key==='Enter') startGame(); });
 
 })();
