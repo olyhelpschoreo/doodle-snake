@@ -371,11 +371,13 @@ function updateSnake(s, dt){
   s.x+=Math.cos(s.dir)*move;
   s.y+=Math.sin(s.dir)*move;
 
-  // advance path: push head point, keep spacing
-  const head=s.pts[0];
-  if(dist2(s.x,s.y,head.x,head.y) > SEG_SPACE*SEG_SPACE){
+  // advance path: pts[0] rides the head every frame; drop an evenly-spaced breadcrumb
+  // whenever the head pulls SEG_SPACE from the last one. Must NOT depend on the per-frame
+  // step being > SEG_SPACE — at 60fps the step is smaller, which froze the whole body.
+  s.pts[0].x=s.x; s.pts[0].y=s.y;
+  if(s.pts.length<2 || dist2(s.x,s.y,s.pts[1].x,s.pts[1].y) > SEG_SPACE*SEG_SPACE){
     s.pts.unshift({x:s.x,y:s.y});
-  } else { head.x=s.x; head.y=s.y; }
+  }
   const need=Math.floor(s.len*2.0)+8;
   if(s.pts.length>need) s.pts.length=need;
 
