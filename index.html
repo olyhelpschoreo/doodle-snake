@@ -131,7 +131,24 @@ const WORLD = 4200;            // arena radius
 const FOOD_COUNT = 900;
 const BOT_COUNT = 16;
 const SEG_SPACE = 3.4;         // distance the path advances per stored point group
-const NAMES = ["Vyper","Coil","Slink","Zephyr","Nox","Echo","Rune","Blitz","Onyx","Pyx","Quill","Vex","Sable","Kilo","Wisp","Drift","Hex","Lumen","Volt","Cobra","Mamba","Specter","Jinx","Zato"];
+
+// ---------- fake-player names (messy handles like real .io lobbies) ----------
+const NM_FIRST=['jo','tom','sam','max','mia','ava','leo','zoe','ben','kai','ella','liam','noah','emma','lily','finn','ryan','jack','luca','maya','eli','nina','omar','ivy','cole','ruby','alex','jake','nora','theo'];
+const NM_WORD=['ninja','sniper','shadow','ghost','dragon','wolf','pro','noob','epic','ice','fire','dark','swift','turbo','mega','pixel','frost','venom','storm','ace','toast','duck','bagel','goose','panda','yeet'];
+function pick(a){ return a[(Math.random()*a.length)|0]; }
+function cap(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
+function randomName(){
+  const n=()=>''+((Math.random()*1000)|0), r=Math.random();
+  if(r<0.26) return pick(NM_FIRST)+n();                     // jo856
+  if(r<0.42) return cap(pick(NM_FIRST));                    // Mia
+  if(r<0.58) return pick(NM_WORD)+n();                      // ninja42
+  if(r<0.70) return 'xX'+cap(pick(NM_WORD))+'Xx';           // xXshadowXx
+  if(r<0.80) return 'guest'+((1000+Math.random()*9000)|0); // guest4821
+  if(r<0.88) return pick(NM_WORD)+'_'+pick(NM_WORD);        // wolf_toast
+  if(r<0.95) return pick(['asdf','qwerty','ok','hi','xd','uwu','420','.','lol','idk','zzz']);
+  return cap(pick(NM_WORD))+cap(pick(NM_FIRST));            // ShadowMax
+}
+const CHATS=['gg','lol','ez','noob','hi','nice','oops','run!',':)','wow','no!','how?','lag?','help','xd','get rekt','follow me','team?',':(','ggwp'];
 // crayon palette (drawn on cream paper, all get an ink outline)
 const COLORS = [
   [70,120,205],[225,80,70],[95,175,90],[235,150,55],[150,100,190],
@@ -139,7 +156,7 @@ const COLORS = [
 ];
 const INK = [43,38,32];
 
-let snakes=[], foods=[], particles=[], trails=[], corpses=[], rings=[];
+let snakes=[], foods=[], particles=[], trails=[], corpses=[], rings=[], feed=[];
 let shake=0, deathT=null;   // screen shake + short beat before the game-over screen
 let player=null, camera={x:0,y:0,zoom:1};
 let running=false, lastT=0, paused=false;
@@ -230,7 +247,7 @@ function makeSnake(isPlayer, name, color){
     x, y, dir: rnd(0,6.28), targetDir: 0,
     speed: 2.5, len: 14, score: 0,
     pts: [], dead:false,
-    boost:false, boostFuel:1,
+    boost:false, boostFuel:1, chat:null,
     ai:{ state:'food', t:0, wander:rnd(0,6.28) }
   };
   for(let i=0;i<60;i++) s.pts.push({x:x - Math.cos(s.dir)*i*SEG_SPACE, y:y - Math.sin(s.dir)*i*SEG_SPACE});
@@ -240,9 +257,22 @@ function makeSnake(isPlayer, name, color){
 function radiusOf(s){ return 6 + Math.min(s.score,2000)*0.013; }
 function segCount(s){ return Math.floor(s.len); }
 
-function killSnake(s){
+function pushFeed(text, kind){
+  feed.unshift({text, kind, life:1});
+  if(feed.length>5) feed.length=5;
+}
+function killSnake(s, killer){
   if(s.dead) return;
   s.dead = true;
+  // kill feed message
+  if(killer && killer!==s){
+    if(killer.isPlayer) pushFeed('You ate '+esc(s.name)+'!', 'you');
+    else if(s.isPlayer)  pushFeed(esc(killer.name)+' ate you', 'you');
+    else                 pushFeed(esc(killer.name)+' ate '+esc(s.name), 'kill');
+    if(!killer.isPlayer && Math.random()<0.5) killer.chat={text:pick(['ez','gg','get rekt','noob','lol']), t:2.0};
+  } else if(s.isPlayer || Math.random()<0.35){
+    pushFeed(esc(s.name)+' hit the wall', 'wall');
+  }
   // body becomes a corpse that visibly breaks apart into food, head -> tail
   const step = Math.max(1, Math.floor(s.pts.length/ Math.min(s.pts.length, 70)));
   const segs=[];
@@ -405,7 +435,7 @@ function collisions(){
   for(let a=0;a<snakes.length;a++){
     const s=snakes[a]; if(s.dead) continue;
     const r=radiusOf(s);
-    let hit=false;
+    let hit=null;
     for(let b=0;b<snakes.length && !hit;b++){
       if(b===a) continue;
       const o=snakes[b]; if(o.dead) continue;
@@ -413,12 +443,13 @@ function collisions(){
       const hitD=(r+or)*0.78; const hitD2=hitD*hitD;
       const op=o.pts; const st=Math.max(1,(op.length/40)|0);
       for(let i=2;i<op.length;i+=st){
-        if(dist2(s.x,s.y,op[i].x,op[i].y) < hitD2){ victims.push(s); hit=true; break; }
+        if(dist2(s.x,s.y,op[i].x,op[i].y) < hitD2){ hit=o; break; }
       }
     }
+    if(hit) victims.push({v:s, killer:hit});
   }
   // apply deaths after the full scan so a mutual head-on kills BOTH snakes
-  for(const v of victims) killSnake(v);
+  for(const {v,killer} of victims) killSnake(v, killer);
 }
 
 // ---------- render ----------
@@ -529,6 +560,22 @@ function draw(){
   ctx.restore();
   drawEdges();
   drawMinimap();
+  drawFeed();
+}
+
+// kill feed — bottom-left, newest on top, fading
+function drawFeed(){
+  ctx.textAlign='left';
+  ctx.font="700 15px 'Chalkboard SE','Comic Sans MS',cursive";
+  const baseY=H-64;
+  for(let i=0;i<feed.length;i++){
+    const f=feed[i], a=Math.min(1,f.life*1.6);
+    const col = f.kind==='you' ? [44,122,75] : f.kind==='kill' ? INK : [140,120,95];
+    const y=baseY - i*24;
+    ctx.lineWidth=3; ctx.strokeStyle='rgba(246,239,221,'+(a*0.9)+')';
+    ctx.strokeText(f.text, 18, y);
+    ctx.fillStyle=rgba(col, a); ctx.fillText(f.text, 18, y);
+  }
 }
 
 function inView(x,y,pad){
@@ -643,6 +690,23 @@ function drawSnake(s){
     ctx.fillStyle=rgba(INK,0.85);
     ctx.fillText(s.name, h.x, h.y - hr - 8);
   }
+
+  // chat / emote bubble
+  if(s.chat && camera.zoom>0.34){
+    const txt=s.chat.text, fade=Math.min(1, s.chat.t*1.5);
+    ctx.font="700 14px 'Chalkboard SE','Comic Sans MS',cursive"; ctx.textAlign='center';
+    const bw=ctx.measureText(txt).width+18, bh=22, bx=h.x, by=h.y - hr - 32;
+    ctx.globalAlpha=fade;
+    ctx.beginPath();
+    if(ctx.roundRect) ctx.roundRect(bx-bw/2, by-bh/2, bw, bh, 7);
+    else ctx.rect(bx-bw/2, by-bh/2, bw, bh);
+    ctx.fillStyle='#fffdf6'; ctx.fill();
+    ctx.lineWidth=2; ctx.strokeStyle=rgba(INK,0.85); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bx-5,by+bh/2-1); ctx.lineTo(bx,by+bh/2+6); ctx.lineTo(bx+5,by+bh/2-1);
+    ctx.closePath(); ctx.fillStyle='#fffdf6'; ctx.fill(); ctx.stroke();
+    ctx.fillStyle=rgba(INK,0.92); ctx.fillText(txt, bx, by+5);
+    ctx.globalAlpha=1;
+  }
 }
 
 function drawMinimap(){
@@ -725,11 +789,20 @@ function tick(now){
   }
   // screen shake decay
   shake*=Math.max(0, 1-dt*6);
+  // kill feed fades out
+  for(let i=feed.length-1;i>=0;i--){ feed[i].life-=dt*0.32; if(feed[i].life<=0) feed.splice(i,1); }
+  // bots randomly say things; chat bubbles time out
+  for(const s of snakes){
+    if(s.dead||s.isPlayer) continue;
+    if(s.chat){ s.chat.t-=dt; if(s.chat.t<=0) s.chat=null; }
+    else if(Math.random() < dt*0.05) s.chat={text:pick(CHATS), t:2.2};
+  }
 
   // respawn dead bots to keep arena full
   for(let i=0;i<snakes.length;i++){
     if(snakes[i].dead && !snakes[i].isPlayer){
-      snakes[i]=makeSnake(false, NAMES[(Math.random()*NAMES.length)|0], COLORS[(Math.random()*COLORS.length)|0]);
+      snakes[i]=makeSnake(false, randomName(), COLORS[(Math.random()*COLORS.length)|0]);
+      if(Math.random()<0.4) pushFeed(esc(snakes[i].name)+' joined', 'join');
     }
   }
   fillFood();
@@ -759,12 +832,12 @@ function tick(now){
 // ---------- game flow ----------
 function startGame(){
   const nm=(document.getElementById('name').value||'').trim().slice(0,12) || 'YOU';
-  snakes=[]; foods=[]; particles=[]; trails=[]; corpses=[]; rings=[];
+  snakes=[]; foods=[]; particles=[]; trails=[]; corpses=[]; rings=[]; feed=[];
   shake=0; deathT=null;
   player=makeSnake(true, nm, COLORS[0]);
   snakes.push(player);
   for(let i=0;i<BOT_COUNT;i++){
-    snakes.push(makeSnake(false, NAMES[i%NAMES.length], COLORS[(i+1)%COLORS.length]));
+    snakes.push(makeSnake(false, randomName(), COLORS[(i+1)%COLORS.length]));
   }
   fillFood();
   camera.x=player.x; camera.y=player.y; camera.zoom=1.05;
