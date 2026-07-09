@@ -394,23 +394,24 @@ function updateSnake(s, dt){
 
 // head vs bodies collision; the snake whose HEAD hits a foreign body dies
 function collisions(){
+  const victims=[];
   for(let a=0;a<snakes.length;a++){
     const s=snakes[a]; if(s.dead) continue;
     const r=radiusOf(s);
-    for(let b=0;b<snakes.length;b++){
+    let hit=false;
+    for(let b=0;b<snakes.length && !hit;b++){
       if(b===a) continue;
       const o=snakes[b]; if(o.dead) continue;
       const or=radiusOf(o);
       const hitD=(r+or)*0.78; const hitD2=hitD*hitD;
       const op=o.pts; const st=Math.max(1,(op.length/40)|0);
       for(let i=2;i<op.length;i+=st){
-        if(dist2(s.x,s.y,op[i].x,op[i].y) < hitD2){
-          killSnake(s); break;
-        }
+        if(dist2(s.x,s.y,op[i].x,op[i].y) < hitD2){ victims.push(s); hit=true; break; }
       }
-      if(s.dead) break;
     }
   }
+  // apply deaths after the full scan so a mutual head-on kills BOTH snakes
+  for(const v of victims) killSnake(v);
 }
 
 // ---------- render ----------
@@ -643,7 +644,7 @@ let hudT=0;
 function updateHUD(dt){
   scoreEl.textContent = player&&!player.dead ? Math.floor(player.len) : Math.floor(player?player.len:0);
   hudT-=dt; if(hudT>0) return; hudT=0.25;
-  const live=snakes.filter(s=>!s.dead).sort((a,b)=>b.score-a.score);
+  const live=snakes.filter(s=>!s.dead).sort((a,b)=>b.len-a.len);
   let html='';
   const top=live.slice(0,5);
   top.forEach((s,i)=>{
@@ -683,6 +684,8 @@ function tick(now){
     }
   }
   fillFood();
+  // cap total food so long games don't accumulate thousands of orbs (drops oldest ambient first)
+  if(foods.length>1500) foods.splice(0, foods.length-1500);
 
   // camera
   if(player){
@@ -720,7 +723,7 @@ function startGame(){
 function endGame(){
   running=false;
   const score=Math.floor(player.len);
-  const live=snakes.filter(s=>!s.dead || s===player).sort((a,b)=>b.score-a.score);
+  const live=snakes.filter(s=>!s.dead || s===player).sort((a,b)=>b.len-a.len);
   const rank=live.indexOf(player)+1 || '—';
   if(score>best){ best=score; localStorage.setItem('ns_best',best); }
   document.getElementById('finalStat').innerHTML=`Length <b>${score}</b>`;
