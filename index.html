@@ -429,9 +429,14 @@ function updateSnake(s, dt){
   if(s.boost){
     sp*=1.9;
     s.boostFuel-=dt*0.55;
-    s.len=Math.max(14, s.len - dt*7);    // boosting burns length
+    s.len=Math.max(14, s.len - dt*7);           // boosting burns length...
+    s.score=Math.max(0, s.score - dt*8);        // ...and points
     if(s.boostFuel<=0){ s.boost=false; s.boostFuel=0; }
-    if(Math.random()<0.4) spawnFood(s.x-Math.cos(s.dir)*8, s.y-Math.sin(s.dir)*8, 1, s.c);
+    // shed mass off the TAIL, not the head — otherwise you instantly re-eat it and GROW
+    if(Math.random()<0.35){
+      const tp=s.pts[s.pts.length-1];
+      if(tp) spawnFood(tp.x+rnd(-5,5), tp.y+rnd(-5,5), 1, s.c);
+    }
     // scribbly pencil speed-trail, streaming off the tail
     if(trails.length<320){
       const ti=Math.min(s.pts.length-1, (s.len*2|0)+4);
