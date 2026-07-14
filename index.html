@@ -280,19 +280,22 @@ function applyPower(s, key){
 }
 
 // ---------- snake ----------
-function makeSnake(isPlayer, name, color){
+function makeSnake(isPlayer, name, color, startScore){
   const ang = rnd(0,6.28), R = rnd(300, WORLD*0.7);
   const x = Math.cos(ang)*R, y = Math.sin(ang)*R;
+  const sc = startScore||0;                          // bots can spawn already-grown
   const s = {
     isPlayer, name, c: color,
     x, y, dir: rnd(0,6.28), targetDir: 0,
-    speed: 2.5, len: 14, score: 0,
+    speed: 2.5, len: 14 + sc*0.9, score: sc,
     pts: [], dead:false,
     boost:false, boostFuel:1, chat:null,
-    pow:{rocket:0, shield:0, magnet:0, invuln:0},
+    pow:{rocket:0, shield:0, magnet:0, invuln:1.8},   // brief spawn protection
     ai:{ state:'food', t:0, wander:rnd(0,6.28) }
   };
-  for(let i=0;i<60;i++) s.pts.push({x:x - Math.cos(s.dir)*i*SEG_SPACE, y:y - Math.sin(s.dir)*i*SEG_SPACE});
+  // lay the full body so a big spawn LOOKS big right away (not a short stub that grows)
+  const nseg = Math.max(60, Math.floor(s.len*2)+10);
+  for(let i=0;i<nseg;i++) s.pts.push({x:x - Math.cos(s.dir)*i*SEG_SPACE, y:y - Math.sin(s.dir)*i*SEG_SPACE});
   s.targetDir = s.dir;
   return s;
 }
@@ -993,7 +996,10 @@ function startGame(){
   player=makeSnake(true, nm, COLORS[0]);
   snakes.push(player);
   for(let i=0;i<BOT_COUNT;i++){
-    snakes.push(makeSnake(false, randomName(), COLORS[(i+1)%COLORS.length]));
+    // spawn already-grown to a realistic spread (skewed small, occasional "veteran")
+    let sc = Math.floor(Math.pow(Math.random(),1.8)*150);
+    if(Math.random()<0.15) sc += Math.floor(Math.random()*250);
+    snakes.push(makeSnake(false, randomName(), COLORS[(i+1)%COLORS.length], sc));
   }
   fillFood();
   fillPowerups();
