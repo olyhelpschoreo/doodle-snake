@@ -99,7 +99,8 @@
     <b>Eat</b> the colorful orbs to grow longer.<br>
     Make other snakes <b>crash into you</b> — then eat what's left.<br>
     Don't hit anyone's body or the wall.<br>
-    <b>Boost</b> to chase or escape — it costs length.
+    <b>Boost</b> to chase or escape — it costs length.<br>
+    Grab <b>power-ups</b>: ✏️ speed · 🛡️ shield · 🧲 magnet · 🧽 eraser!
   </div>
 </div>
 
@@ -160,7 +161,7 @@ const COLORS = [
 ];
 const INK = [43,38,32];
 
-let snakes=[], foods=[], particles=[], trails=[], corpses=[], rings=[], feed=[];
+let snakes=[], foods=[], particles=[], trails=[], corpses=[], rings=[], feed=[], powerups=[];
 let shake=0, deathT=null;   // screen shake + short beat before the game-over screen
 let player=null, camera={x:0,y:0,zoom:1};
 let running=false, lastT=0, paused=false;
@@ -242,6 +243,42 @@ function spawnFood(x,y,val,color){
 }
 function fillFood(){ while(foods.length<FOOD_COUNT) spawnFood(); }
 
+// ---------- power-ups (the "special" school-supply pickups) ----------
+const POW_COUNT = 5;
+const POW_DUR = { rocket:4.5, shield:12, magnet:8 };   // eraser is instant
+function spawnPowerup(){
+  const key = ['rocket','shield','magnet','eraser'][(Math.random()*4)|0];
+  powerups.push({ x:rnd(-WORLD*0.9,WORLD*0.9), y:rnd(-WORLD*0.9,WORLD*0.9), key, ph:Math.random()*6.28 });
+}
+function fillPowerups(){ while(powerups.length<POW_COUNT) spawnPowerup(); }
+
+function eraseTail(o, amount){                 // rub a chunk off a snake -> crumbs of food
+  o.len=Math.max(8, o.len-amount);
+  o.score=Math.max(0, o.score-amount*2);
+  const tp=o.pts[o.pts.length-1];
+  if(tp) spawnFood(tp.x+rnd(-7,7), tp.y+rnd(-7,7), rnd(2,4), o.c);
+}
+function popShield(s){
+  rings.push({x:s.x,y:s.y,r:radiusOf(s)*1.9,life:1,c:[110,170,230]});
+  if(s.isPlayer){ shake=Math.max(shake,6); pushFeed('Your shield saved you!','you'); }
+}
+function applyPower(s, key){
+  if(key==='eraser'){
+    const R=360;
+    for(const o of snakes){
+      if(o===s||o.dead) continue;
+      if(dist2(s.x,s.y,o.x,o.y) < R*R) eraseTail(o, 9);
+    }
+    rings.push({x:s.x,y:s.y,r:44,life:1,c:[120,120,120]});   // grey eraser scrub
+    burst(s.x,s.y,[210,205,195],22);
+    if(s.isPlayer) shake=Math.max(shake,9);
+    pushFeed((s.isPlayer?'You':esc(s.name))+' used the eraser!', s.isPlayer?'you':'kill');
+  } else {
+    s.pow[key]=POW_DUR[key];
+    if(s.isPlayer) pushFeed('Grabbed a '+key+'!', 'you');
+  }
+}
+
 // ---------- snake ----------
 function makeSnake(isPlayer, name, color){
   const ang = rnd(0,6.28), R = rnd(300, WORLD*0.7);
@@ -252,6 +289,7 @@ function makeSnake(isPlayer, name, color){
     speed: 2.5, len: 14, score: 0,
     pts: [], dead:false,
     boost:false, boostFuel:1, chat:null,
+    pow:{rocket:0, shield:0, magnet:0, invuln:0},
     ai:{ state:'food', t:0, wander:rnd(0,6.28) }
   };
   for(let i=0;i<60;i++) s.pts.push({x:x - Math.cos(s.dir)*i*SEG_SPACE, y:y - Math.sin(s.dir)*i*SEG_SPACE});
@@ -364,6 +402,7 @@ function steerAI(s, dt){
 // ---------- update ----------
 function updateSnake(s, dt){
   if(s.dead) return;
+  { const P=s.pow; for(const k in P) if(P[k]>0) P[k]=Math.max(0,P[k]-dt); }   // power timers
   if(s.isPlayer){
     if(mouse.has){
       // steer by the cursor's angle from screen centre (the head) — like slither.io.
@@ -400,6 +439,7 @@ function updateSnake(s, dt){
   } else {
     s.boostFuel=Math.min(1, s.boostFuel+dt*0.22);
   }
+  if(s.pow.rocket>0) sp*=1.7;   // pencil-rocket: extra speed, no length cost
 
   const move=sp*(60*dt);
   s.x+=Math.cos(s.dir)*move;
@@ -415,14 +455,26 @@ function updateSnake(s, dt){
   const need=Math.floor(s.len*2.0)+8;
   if(s.pts.length>need) s.pts.length=need;
 
-  // wall death
-  if(Math.hypot(s.x,s.y) > WORLD){
-    if(s.isPlayer){ killSnake(s); return; }
-    else { killSnake(s); return; }
+  // wall — shield/invuln bounces you back inside; otherwise you die
+  const dc=Math.hypot(s.x,s.y);
+  if(dc > WORLD){
+    if(s.pow.shield>0 || s.pow.invuln>0){
+      const k=(WORLD-10)/dc; s.x*=k; s.y*=k; s.dir=Math.atan2(-s.y,-s.x);
+      if(s.pow.shield>0){ s.pow.shield=0; s.pow.invuln=1.0; popShield(s); }
+    } else { killSnake(s); return; }
   }
 
+  const r=radiusOf(s);
+  // magnet: vacuum nearby food toward the head
+  if(s.pow.magnet>0){
+    for(const f of foods){
+      const d2=dist2(s.x,s.y,f.x,f.y);
+      if(d2 < 240*240){ const d=Math.sqrt(d2)||1, pull=Math.min(9,900/d);
+        f.x+=(s.x-f.x)/d*pull; f.y+=(s.y-f.y)/d*pull; }
+    }
+  }
   // eat food
-  const r=radiusOf(s), eatR=(r+13);
+  const eatR=(r+13);
   for(let i=foods.length-1;i>=0;i--){
     const f=foods[i];
     if(dist2(s.x,s.y,f.x,f.y) < eatR*eatR){
@@ -431,13 +483,18 @@ function updateSnake(s, dt){
       foods[i]=foods[foods.length-1]; foods.pop();
     }
   }
+  // pick up power-ups
+  for(let i=powerups.length-1;i>=0;i--){
+    const pu=powerups[i];
+    if(dist2(s.x,s.y,pu.x,pu.y) < (r+18)*(r+18)){ applyPower(s, pu.key); powerups.splice(i,1); }
+  }
 }
 
 // head vs bodies collision; the snake whose HEAD hits a foreign body dies
 function collisions(){
   const victims=[];
   for(let a=0;a<snakes.length;a++){
-    const s=snakes[a]; if(s.dead) continue;
+    const s=snakes[a]; if(s.dead || s.pow.invuln>0) continue;
     const r=radiusOf(s);
     let hit=null;
     for(let b=0;b<snakes.length && !hit;b++){
@@ -453,7 +510,10 @@ function collisions(){
     if(hit) victims.push({v:s, killer:hit});
   }
   // apply deaths after the full scan so a mutual head-on kills BOTH snakes
-  for(const {v,killer} of victims) killSnake(v, killer);
+  for(const {v,killer} of victims){
+    if(v.pow.shield>0){ v.pow.shield=0; v.pow.invuln=1.0; popShield(v); continue; }   // shield eats the hit
+    killSnake(v, killer);
+  }
 }
 
 // ---------- render ----------
@@ -533,6 +593,13 @@ function draw(){
     ctx.lineWidth=2; ctx.strokeStyle=rgba(INK,g.life*0.35); ctx.stroke();
   }
 
+  // power-ups (hand-drawn school-supply pickups on little sticker badges)
+  const pt2=performance.now()*0.003;
+  for(const pu of powerups){
+    if(!inView(pu.x,pu.y,40)) continue;
+    drawPowerup(pu, 1+0.08*Math.sin(pt2+pu.ph));
+  }
+
   // boost trails (under the snakes)
   ctx.lineCap='round';
   for(let i=0;i<trails.length;i++){
@@ -565,6 +632,26 @@ function draw(){
   drawEdges();
   drawMinimap();
   drawFeed();
+  drawPowerHUD();
+}
+
+// player's active power-ups, top-left under the LENGTH readout, with a draining timer ring
+function drawPowerHUD(){
+  if(!player || player.dead) return;
+  const act=[];
+  if(player.pow.rocket>0) act.push(['rocket', player.pow.rocket, POW_DUR.rocket]);
+  if(player.pow.shield>0) act.push(['shield', player.pow.shield, POW_DUR.shield]);
+  if(player.pow.magnet>0) act.push(['magnet', player.pow.magnet, POW_DUR.magnet]);
+  let x=34, y=104;
+  for(const [key,t,dur] of act){
+    const col=POW_COL[key], R=18;
+    ctx.beginPath(); ctx.arc(x,y,R,0,6.2832); ctx.fillStyle='#fffdf6'; ctx.fill();
+    ctx.lineWidth=2.2; ctx.strokeStyle=rgba(INK,0.85); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x,y,R-1.5, -Math.PI/2, -Math.PI/2 + 6.2832*clamp(t/dur,0,1));
+    ctx.lineWidth=3.2; ctx.strokeStyle=rgba(col,0.95); ctx.stroke();
+    ctx.save(); ctx.translate(x,y); powGlyph(key, R*0.5); ctx.restore();
+    y+=44;
+  }
 }
 
 // kill feed — bottom-left, newest on top, fading
@@ -580,6 +667,59 @@ function drawFeed(){
     ctx.strokeText(f.text, 18, y);
     ctx.fillStyle=rgba(col, a); ctx.fillText(f.text, 18, y);
   }
+}
+
+// ---------- power-up icons (drawn on a white sticker badge with ink outline) ----------
+const POW_COL = { rocket:[235,150,55], shield:[70,140,205], magnet:[210,70,70], eraser:[235,150,175] };
+function powGlyph(key, s){   // draw the glyph centred at (0,0), roughly fits within radius s
+  ctx.lineJoin='round'; ctx.lineCap='round';
+  if(key==='rocket'){                     // a little pencil (diagonal)
+    ctx.save(); ctx.rotate(-0.7);
+    ctx.fillStyle='#f2c14e'; ctx.strokeStyle=rgba(INK,0.9); ctx.lineWidth=1.6;
+    ctx.beginPath(); ctx.rect(-s*0.16,-s*0.7, s*0.32, s*1.1); ctx.fill(); ctx.stroke();     // body
+    ctx.beginPath(); ctx.moveTo(-s*0.16,s*0.4); ctx.lineTo(0,s*0.75); ctx.lineTo(s*0.16,s*0.4); ctx.closePath();
+    ctx.fillStyle='#e8c9a0'; ctx.fill(); ctx.stroke();                                       // wood tip
+    ctx.beginPath(); ctx.moveTo(-s*0.06,s*0.62); ctx.lineTo(0,s*0.75); ctx.lineTo(s*0.06,s*0.62); ctx.closePath();
+    ctx.fillStyle='#333'; ctx.fill();                                                        // graphite
+    ctx.fillStyle='#f28fb0'; ctx.beginPath(); ctx.rect(-s*0.16,-s*0.7,s*0.32,s*0.18); ctx.fill(); ctx.stroke(); // eraser end
+    ctx.restore();
+  } else if(key==='shield'){
+    ctx.fillStyle='#bcd6f5'; ctx.strokeStyle=rgba(INK,0.9); ctx.lineWidth=1.8;
+    ctx.beginPath();
+    ctx.moveTo(0,-s*0.7); ctx.lineTo(s*0.6,-s*0.4); ctx.lineTo(s*0.6,s*0.1);
+    ctx.quadraticCurveTo(s*0.6,s*0.6, 0,s*0.8);
+    ctx.quadraticCurveTo(-s*0.6,s*0.6,-s*0.6,s*0.1); ctx.lineTo(-s*0.6,-s*0.4); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,-s*0.35); ctx.lineTo(0,s*0.45); ctx.moveTo(-s*0.32,s*0.05); ctx.lineTo(s*0.32,s*0.05);
+    ctx.lineWidth=1.6; ctx.stroke();
+  } else if(key==='magnet'){              // horseshoe magnet
+    ctx.strokeStyle='#d24646'; ctx.lineWidth=s*0.34; ctx.lineCap='butt';
+    ctx.beginPath(); ctx.arc(0,0,s*0.5,Math.PI*0.9,Math.PI*0.1,true); ctx.stroke();
+    ctx.strokeStyle=rgba(INK,0.9); ctx.lineWidth=1.4;
+    ctx.beginPath(); ctx.arc(0,0,s*0.67,Math.PI*0.9,Math.PI*0.1,true); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0,0,s*0.33,Math.PI*0.9,Math.PI*0.1,true); ctx.stroke();
+    ctx.fillStyle='#cdd3d8';                // steel tips
+    for(const sx of [-1,1]){ ctx.beginPath(); ctx.rect(sx*s*0.5-s*0.17, s*0.16, s*0.34, s*0.2); ctx.fill(); ctx.stroke(); }
+  } else {                                 // eraser (classic pink block)
+    ctx.save(); ctx.rotate(-0.35);
+    ctx.fillStyle='#f2a9c4'; ctx.strokeStyle=rgba(INK,0.9); ctx.lineWidth=1.7;
+    ctx.beginPath(); ctx.rect(-s*0.6,-s*0.34, s*1.2, s*0.68); ctx.fill(); ctx.stroke();
+    ctx.fillStyle='#e2f0f2'; ctx.beginPath(); ctx.rect(-s*0.6,-s*0.34, s*0.42, s*0.68); ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+}
+function drawPowerup(pu, bob){
+  const R=15*bob, col=POW_COL[pu.key];
+  ctx.save(); ctx.translate(pu.x, pu.y);
+  // glow halo
+  ctx.beginPath(); ctx.arc(0,0,R+7,0,6.2832); ctx.fillStyle=rgba(col,0.18); ctx.fill();
+  // white sticker
+  ctx.beginPath(); ctx.arc(0,0,R,0,6.2832); ctx.fillStyle='#fffdf6'; ctx.fill();
+  ctx.lineWidth=2.4; ctx.strokeStyle=rgba(INK,0.88); ctx.stroke();
+  ctx.lineWidth=2.2; ctx.strokeStyle=rgba(col,0.9);
+  ctx.beginPath(); ctx.arc(0,0,R-3.5,0,6.2832); ctx.stroke();
+  powGlyph(pu.key, R*0.62);
+  ctx.restore();
 }
 
 function inView(x,y,pad){
@@ -677,6 +817,14 @@ function drawSnake(s){
     ctx.beginPath(); ctx.arc(h.x+o[0],h.y+o[1],hr,0,6.2832); ctx.stroke();
   }
   ctx.beginPath(); ctx.arc(h.x,h.y,hr,0,6.2832); ctx.fillStyle=rgba(c,1); ctx.fill();
+
+  // shield bubble (blue) when protected; flicker while briefly invulnerable
+  if(s.pow.shield>0 || s.pow.invuln>0){
+    const br=hr+7+Math.sin(performance.now()*0.008)*1.5;
+    ctx.beginPath(); ctx.arc(h.x,h.y,br,0,6.2832);
+    ctx.fillStyle='rgba(120,175,235,0.16)'; ctx.fill();
+    ctx.lineWidth=2.4; ctx.strokeStyle='rgba(90,160,230,'+(s.pow.shield>0?0.85:0.4)+')'; ctx.stroke();
+  }
 
   // googly eyes
   for(const sgn of [-1,1]){
@@ -810,6 +958,7 @@ function tick(now){
     }
   }
   fillFood();
+  fillPowerups();
   // cap total food so long games don't accumulate thousands of orbs (drops oldest ambient first)
   if(foods.length>1500) foods.splice(0, foods.length-1500);
 
@@ -836,7 +985,7 @@ function tick(now){
 // ---------- game flow ----------
 function startGame(){
   const nm=(document.getElementById('name').value||'').trim().slice(0,12) || 'YOU';
-  snakes=[]; foods=[]; particles=[]; trails=[]; corpses=[]; rings=[]; feed=[];
+  snakes=[]; foods=[]; particles=[]; trails=[]; corpses=[]; rings=[]; feed=[]; powerups=[];
   shake=0; deathT=null;
   player=makeSnake(true, nm, COLORS[0]);
   snakes.push(player);
@@ -844,6 +993,7 @@ function startGame(){
     snakes.push(makeSnake(false, randomName(), COLORS[(i+1)%COLORS.length]));
   }
   fillFood();
+  fillPowerups();
   camera.x=player.x; camera.y=player.y; camera.zoom=1.05;
   document.getElementById('start').classList.add('hidden');
   document.getElementById('gameover').classList.add('hidden');
