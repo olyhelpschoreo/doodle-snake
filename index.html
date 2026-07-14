@@ -502,7 +502,10 @@ function collisions(){
       const o=snakes[b]; if(o.dead) continue;
       const or=radiusOf(o);
       const hitD=(r+or)*0.78; const hitD2=hitD*hitD;
-      const op=o.pts; const st=Math.max(1,(op.length/40)|0);
+      const op=o.pts;
+      // sample body points spaced by ~the hit distance (NOT a fixed count) so a head can
+      // never slip between samples on a long snake. Bigger snake -> more points checked.
+      const st=Math.max(1, (hitD/SEG_SPACE)|0);
       for(let i=2;i<op.length;i+=st){
         if(dist2(s.x,s.y,op[i].x,op[i].y) < hitD2){ hit=o; break; }
       }
