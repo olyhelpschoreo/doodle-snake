@@ -116,6 +116,7 @@
     <canvas id="skinPrev"></canvas>
     <div class="swatches" id="colorRow"></div>
     <div class="pats" id="patRow"></div>
+    <div class="pats"><button class="pat" id="sndBtn" type="button">🔊 Sound On</button></div>
   </div>
   <button class="btn" id="playBtn">Play</button>
   <div class="how">
@@ -208,6 +209,74 @@ const rnd=(a,b)=>a+Math.random()*(b-a);
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
 const dist2=(ax,ay,bx,by)=>{const dx=ax-bx,dy=ay-by;return dx*dx+dy*dy;};
 function rgba(c,a){return `rgba(${c[0]},${c[1]},${c[2]},${a})`;}
+
+// ---------- sound: synthesised on the fly, no audio files ----------
+let actx=null, masterGain=null, noiseBuf=null, boostGain=null, lastEatSnd=0;
+let soundOn=true; try{ soundOn = localStorage.getItem('ds_sound')!=='0'; }catch(e){}
+function mkNoise(){
+  if(noiseBuf) return noiseBuf;
+  const len=actx.sampleRate|0;
+  noiseBuf=actx.createBuffer(1,len,actx.sampleRate);
+  const d=noiseBuf.getChannelData(0);
+  for(let i=0;i<len;i++) d[i]=Math.random()*2-1;
+  return noiseBuf;
+}
+function audioInit(){
+  if(actx) return;
+  try{
+    const AC=window.AudioContext||window.webkitAudioContext; if(!AC) return;
+    actx=new AC();
+    masterGain=actx.createGain(); masterGain.gain.value=soundOn?0.5:0;
+    masterGain.connect(actx.destination);
+    // continuous pencil-scratch hiss used while boosting (kept silent until needed)
+    const src=actx.createBufferSource(); src.buffer=mkNoise(); src.loop=true;
+    const f=actx.createBiquadFilter(); f.type='bandpass'; f.frequency.value=2200; f.Q.value=0.8;
+    boostGain=actx.createGain(); boostGain.gain.value=0;
+    src.connect(f); f.connect(boostGain); boostGain.connect(masterGain); src.start();
+  }catch(e){ actx=null; }
+}
+function audioResume(){ audioInit(); if(actx && actx.state==='suspended') actx.resume(); }
+function setSound(on){
+  soundOn=on; try{ localStorage.setItem('ds_sound', on?'1':'0'); }catch(e){}
+  if(masterGain) masterGain.gain.value = on?0.5:0;
+  const b=document.getElementById('sndBtn'); if(b) b.textContent = on?'🔊 Sound On':'🔇 Sound Off';
+}
+function blip(freq,dur,type,vol,slideTo){
+  if(!actx||!soundOn) return;
+  const t=actx.currentTime, o=actx.createOscillator(), g=actx.createGain();
+  o.type=type||'sine'; o.frequency.setValueAtTime(freq,t);
+  if(slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(1,slideTo), t+dur);
+  g.gain.setValueAtTime(0.0001,t);
+  g.gain.linearRampToValueAtTime(vol||0.2, t+0.006);
+  g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+  o.connect(g); g.connect(masterGain); o.start(t); o.stop(t+dur+0.03);
+}
+function scratch(dur,freq,vol,q){          // filtered noise = paper / pencil / rubbing
+  if(!actx||!soundOn) return;
+  const t=actx.currentTime;
+  const src=actx.createBufferSource(); src.buffer=mkNoise(); src.loop=true;
+  const f=actx.createBiquadFilter(); f.type='bandpass'; f.frequency.value=freq||1200; f.Q.value=q||1;
+  const g=actx.createGain();
+  g.gain.setValueAtTime(0.0001,t); g.gain.linearRampToValueAtTime(vol||0.18,t+0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  src.connect(f); f.connect(g); g.connect(masterGain);
+  src.start(t); src.stop(t+dur+0.03);
+}
+const SFX={
+  eat(n){ blip(500+Math.min(n,8)*30, 0.07, 'triangle', 0.13); },
+  pickup(){ [523,659,784,1047].forEach((f,i)=> setTimeout(()=>blip(f,0.1,'square',0.09), i*55)); },
+  eraser(){ scratch(0.5, 1600, 0.3, 0.7); },                      // rubbing it out
+  kill(){ blip(320,0.14,'square',0.16,110); scratch(0.2, 700, 0.15); },
+  shield(){ blip(760,0.18,'sine',0.16,1500); },
+  die(){ blip(420,0.5,'sawtooth',0.2,60); scratch(0.5, 500, 0.2); },
+  scribbled(){ scratch(0.55, 900, 0.32, 0.6); },
+  pop(){ blip(240,0.1,'square',0.05,90); },                        // someone died nearby
+  click(){ blip(700,0.05,'square',0.07); }
+};
+function setBoostSound(on){
+  if(!actx||!boostGain) return;
+  boostGain.gain.setTargetAtTime((on&&soundOn)?0.11:0, actx.currentTime, 0.05);
+}
 
 // ---------- paper grain (built once, tiled in screen space) ----------
 function buildPaper(){
@@ -334,7 +403,7 @@ function eraseTail(o, amount){                 // rub a chunk off a snake -> cru
 }
 function popShield(s){
   rings.push({x:s.x,y:s.y,r:radiusOf(s)*1.9,life:1,c:[110,170,230]});
-  if(s.isPlayer){ shake=Math.max(shake,6); pushFeed('Your shield saved you!','you'); }
+  if(s.isPlayer){ shake=Math.max(shake,6); pushFeed('Your shield saved you!','you'); SFX.shield(); }
 }
 function applyPower(s, key){
   if(key==='eraser'){
@@ -345,11 +414,11 @@ function applyPower(s, key){
     }
     rings.push({x:s.x,y:s.y,r:44,life:1,c:[120,120,120]});   // grey eraser scrub
     burst(s.x,s.y,[210,205,195],22);
-    if(s.isPlayer) shake=Math.max(shake,9);
+    if(s.isPlayer){ shake=Math.max(shake,9); SFX.eraser(); }
     pushFeed((s.isPlayer?'You':esc(s.name))+' used the eraser!', s.isPlayer?'you':'kill');
   } else {
     s.pow[key]=POW_DUR[key];
-    if(s.isPlayer) pushFeed('Grabbed a '+key+'!', 'you');
+    if(s.isPlayer){ pushFeed('Grabbed a '+key+'!', 'you'); SFX.pickup(); }
   }
 }
 
@@ -395,6 +464,10 @@ function killSnake(s, killer, cause){
                : ' hit the wall';
     pushFeed(esc(s.name)+what, 'wall');
   }
+  // sound
+  if(s.isPlayer) (cause==='scribble' ? SFX.scribbled() : SFX.die());
+  else if(killer && killer.isPlayer) SFX.kill();
+  else if(player && !player.dead && dist2(s.x,s.y,player.x,player.y) < 800*800) SFX.pop();
   // body becomes a corpse that visibly breaks apart into food, head -> tail
   const step = Math.max(1, Math.floor(s.pts.length/ Math.min(s.pts.length, 70)));
   const segs=[];
@@ -584,13 +657,19 @@ function updateSnake(s, dt){
   }
   // eat food
   const eatR=(r+13);
+  let ate=0;
   for(let i=foods.length-1;i>=0;i--){
     const f=foods[i];
     if(dist2(s.x,s.y,f.x,f.y) < eatR*eatR){
       s.score+=f.val; s.len+=f.val*0.9;
       if(s.isPlayer) burst(f.x,f.y,f.c,4);
       foods[i]=foods[foods.length-1]; foods.pop();
+      ate++;
     }
+  }
+  if(s.isPlayer && ate>0){                       // throttle so a magnet run isn't a machine-gun
+    const now=performance.now();
+    if(now-lastEatSnd>55){ lastEatSnd=now; SFX.eat(ate); }
   }
   // pick up power-ups
   for(let i=powerups.length-1;i>=0;i--){
@@ -1127,6 +1206,7 @@ function tick(now){
   updateMonster(dt);
   for(const s of snakes) updateSnake(s, dt);
   collisions();
+  setBoostSound(!!(player && !player.dead && player.boost));
 
   // particles
   for(let i=particles.length-1;i>=0;i--){
@@ -1237,7 +1317,7 @@ function startGame(){
 }
 
 function endGame(){
-  running=false;
+  running=false; setBoostSound(false);
   const score=Math.floor(player.len);
   const live=snakes.filter(s=>!s.dead || s===player).sort((a,b)=>b.len-a.len);
   const rank=live.indexOf(player)+1 || '—';
@@ -1249,7 +1329,7 @@ function endGame(){
 }
 
 function toMenu(){
-  running=false;
+  running=false; setBoostSound(false);
   document.getElementById('gameover').classList.add('hidden');
   hud.classList.add('hidden');
   document.getElementById('start').classList.remove('hidden');
@@ -1289,22 +1369,27 @@ function buildSkinUI(){
     const b=document.createElement('button');
     b.className='sw'+(i===mySkin.color?' on':''); b.style.background=rgba(c,1);
     b.title='colour'; b.type='button';
-    b.addEventListener('click',()=>{ mySkin.color=i; saveSkin(); buildSkinUI(); renderSkinPreview(); });
+    b.addEventListener('click',()=>{ audioResume(); SFX.click(); mySkin.color=i; saveSkin(); buildSkinUI(); renderSkinPreview(); });
     cr.appendChild(b);
   });
   PATTERNS.forEach(p=>{
     const b=document.createElement('button');
     b.className='pat'+(p===mySkin.pattern?' on':''); b.textContent=PAT_LABEL[p]; b.type='button';
-    b.addEventListener('click',()=>{ mySkin.pattern=p; saveSkin(); buildSkinUI(); renderSkinPreview(); });
+    b.addEventListener('click',()=>{ audioResume(); SFX.click(); mySkin.pattern=p; saveSkin(); buildSkinUI(); renderSkinPreview(); });
     pr.appendChild(b);
   });
 }
 buildSkinUI(); renderSkinPreview();
 
-document.getElementById('playBtn').addEventListener('click', startGame);
-document.getElementById('againBtn').addEventListener('click', startGame);
-document.getElementById('menuBtn').addEventListener('click', toMenu);
-document.getElementById('name').addEventListener('keydown',e=>{ if(e.key==='Enter') startGame(); });
+const sndBtn=document.getElementById('sndBtn');
+sndBtn.addEventListener('click', ()=>{ audioResume(); setSound(!soundOn); if(soundOn) SFX.click(); });
+setSound(soundOn);   // sync the button label with the saved setting
+window.addEventListener('keydown', e=>{ if(e.key==='m'||e.key==='M'){ audioResume(); setSound(!soundOn); } });
+
+document.getElementById('playBtn').addEventListener('click', ()=>{ audioResume(); SFX.click(); startGame(); });
+document.getElementById('againBtn').addEventListener('click', ()=>{ audioResume(); SFX.click(); startGame(); });
+document.getElementById('menuBtn').addEventListener('click', ()=>{ SFX.click(); toMenu(); });
+document.getElementById('name').addEventListener('keydown',e=>{ if(e.key==='Enter'){ audioResume(); startGame(); } });
 
 })();
 </script>
