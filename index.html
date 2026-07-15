@@ -178,7 +178,8 @@ function randomName(){
   if(r<0.95) return pick(['asdf','qwerty','ok','hi','xd','uwu','420','.','lol','idk','zzz']);
   return cap(pick(NM_WORD))+cap(pick(NM_FIRST));            // ShadowMax
 }
-const CHATS=['gg','lol','ez','noob','hi','nice','oops','run!',':)','wow','no!','how?','lag?','help','xd','get rekt','follow me','team?',':(','ggwp'];
+// friendly chatter only — no trash talk
+const CHATS=['gg','lol','hi','nice','oops','run!',':)','wow','no!','how?','lag?','help','xd','follow me','team?',':(','ggwp','oof','haha','wait!','hey','nooo'];
 // crayon palette (drawn on cream paper, all get an ink outline)
 const COLORS = [
   [70,120,205],[225,80,70],[95,175,90],[235,150,55],[150,100,190],
@@ -457,7 +458,7 @@ function killSnake(s, killer, cause){
     if(killer.isPlayer) pushFeed('You ate '+esc(s.name)+'!', 'you');
     else if(s.isPlayer)  pushFeed(esc(killer.name)+' ate you', 'you');
     else                 pushFeed(esc(killer.name)+' ate '+esc(s.name), 'kill');
-    if(!killer.isPlayer && Math.random()<0.5) killer.chat={text:pick(['ez','gg','get rekt','noob','lol']), t:2.0};
+    if(!killer.isPlayer && Math.random()<0.5) killer.chat={text:pick(['gg','nice','oof','wow']), t:2.0};
   } else if(s.isPlayer || Math.random()<0.35){
     const what = cause==='hole' ? ' fell through a hole'
                : cause==='scribble' ? ' got scribbled out'
