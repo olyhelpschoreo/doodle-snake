@@ -123,7 +123,8 @@
     Make other snakes <b>crash into you</b> — then eat what's left.<br>
     Don't hit anyone's body or the wall.<br>
     <b>Boost</b> to chase or escape — it costs length.<br>
-    Grab <b>power-ups</b>: ✏️ speed · 🛡️ shield · 🧲 magnet · 🧽 eraser!
+    Grab <b>power-ups</b>: ✏️ speed · 🛡️ shield · 🧲 magnet · 🧽 eraser!<br>
+    <b>Watch out</b>: ☕ coffee slows you · 🕳️ holes · the <b>Scribble</b>!
   </div>
 </div>
 
@@ -194,6 +195,7 @@ try{ const sv=JSON.parse(localStorage.getItem('ds_skin')||'null');
 function saveSkin(){ try{ localStorage.setItem('ds_skin', JSON.stringify(mySkin)); }catch(e){} }
 
 let snakes=[], foods=[], particles=[], trails=[], corpses=[], rings=[], feed=[], powerups=[];
+let stains=[], holes=[], monster=null;   // notebook hazards
 let shake=0, deathT=null;   // screen shake + short beat before the game-over screen
 let player=null, camera={x:0,y:0,zoom:1};
 let running=false, lastT=0, paused=false;
@@ -284,6 +286,46 @@ function spawnPowerup(){
 }
 function fillPowerups(){ while(powerups.length<POW_COUNT) spawnPowerup(); }
 
+// ---------- notebook hazards: coffee stains, torn holes, the Scribble ----------
+function makeStains(){
+  stains=[];
+  for(let i=0;i<9;i++){
+    const a=rnd(0,6.28), R=rnd(400, WORLD*0.85);
+    stains.push({ x:Math.cos(a)*R, y:Math.sin(a)*R, r:rnd(180,340), seed:rnd(0,99) });
+  }
+}
+function inStain(x,y){
+  for(const st of stains) if(dist2(x,y,st.x,st.y) < st.r*st.r) return true;
+  return false;
+}
+function makeHoles(){
+  holes=[];
+  for(let i=0;i<7;i++){
+    const a=rnd(0,6.28), R=rnd(500, WORLD*0.85), r=rnd(55,110);
+    const pts=[], k=14;
+    for(let j=0;j<k;j++){
+      const ang=j/k*6.2832, rr=r*(0.78+Math.random()*0.42);
+      pts.push({x:Math.cos(ang)*rr, y:Math.sin(ang)*rr});
+    }
+    holes.push({ x:Math.cos(a)*R, y:Math.sin(a)*R, r, pts });
+  }
+}
+function makeMonster(){
+  const a=rnd(0,6.28), R=rnd(300, WORLD*0.6);
+  monster={ x:Math.cos(a)*R, y:Math.sin(a)*R, dir:rnd(0,6.28), r:46, t:0, next:0, wander:rnd(0,6.28) };
+}
+function updateMonster(dt){
+  if(!monster) return;
+  const m=monster; m.t+=dt;
+  if(m.t>m.next){ m.wander+=rnd(-1.0,1.0); m.next=m.t+rnd(1.5,3.5); }
+  let target=m.wander;
+  if(Math.hypot(m.x,m.y) > WORLD-300) target=Math.atan2(-m.y,-m.x);   // stay on the page
+  let d=target-m.dir; while(d>Math.PI)d-=6.283; while(d<-Math.PI)d+=6.283;
+  m.dir += clamp(d,-0.03,0.03)*(60*dt);
+  const sp=1.5*(60*dt);                                               // slower than snakes, so it's dodgeable
+  m.x+=Math.cos(m.dir)*sp; m.y+=Math.sin(m.dir)*sp;
+}
+
 function eraseTail(o, amount){                 // rub a chunk off a snake -> crumbs of food
   o.len=Math.max(8, o.len-amount);
   o.score=Math.max(0, o.score-amount*2);
@@ -338,7 +380,7 @@ function pushFeed(text, kind){
   feed.unshift({text, kind, life:1});
   if(feed.length>5) feed.length=5;
 }
-function killSnake(s, killer){
+function killSnake(s, killer, cause){
   if(s.dead) return;
   s.dead = true;
   // kill feed message
@@ -348,7 +390,10 @@ function killSnake(s, killer){
     else                 pushFeed(esc(killer.name)+' ate '+esc(s.name), 'kill');
     if(!killer.isPlayer && Math.random()<0.5) killer.chat={text:pick(['ez','gg','get rekt','noob','lol']), t:2.0};
   } else if(s.isPlayer || Math.random()<0.35){
-    pushFeed(esc(s.name)+' hit the wall', 'wall');
+    const what = cause==='hole' ? ' fell through a hole'
+               : cause==='scribble' ? ' got scribbled out'
+               : ' hit the wall';
+    pushFeed(esc(s.name)+what, 'wall');
   }
   // body becomes a corpse that visibly breaks apart into food, head -> tail
   const step = Math.max(1, Math.floor(s.pts.length/ Math.min(s.pts.length, 70)));
@@ -424,6 +469,13 @@ function steerAI(s, dt){
     if(a.t<=0){ a.wander+=rnd(-0.8,0.8); a.t=rnd(0.6,1.6); }
     desired=a.wander;
   }
+  // dodge the notebook hazards (holes + the Scribble beat food-seeking)
+  for(const ho of holes){
+    if(dist2(s.x,s.y,ho.x,ho.y) < (ho.r+150)*(ho.r+150)){ desired=Math.atan2(s.y-ho.y, s.x-ho.x); break; }
+  }
+  if(monster && dist2(s.x,s.y,monster.x,monster.y) < (monster.r+190)*(monster.r+190)){
+    desired=Math.atan2(s.y-monster.y, s.x-monster.x);
+  }
   // wall avoidance
   const distC=Math.hypot(s.x,s.y);
   if(distC > WORLD-260){
@@ -480,6 +532,7 @@ function updateSnake(s, dt){
     s.boostFuel=Math.min(1, s.boostFuel+dt*0.22);
   }
   if(s.pow.rocket>0) sp*=1.7;   // pencil-rocket: extra speed, no length cost
+  if(inStain(s.x,s.y)) sp*=0.55;  // coffee stain: slogging through a wet patch
 
   const move=sp*(60*dt);
   s.x+=Math.cos(s.dir)*move;
@@ -505,6 +558,22 @@ function updateSnake(s, dt){
   }
 
   const r=radiusOf(s);
+
+  // torn-paper holes + the Scribble — shield/invuln protects you, otherwise it's fatal
+  let haz=null;
+  for(const ho of holes){
+    if(dist2(s.x,s.y,ho.x,ho.y) < (ho.r*0.75)*(ho.r*0.75)){ haz='hole'; break; }
+  }
+  if(!haz && monster){
+    const md=monster.r+r*0.6;
+    if(dist2(s.x,s.y,monster.x,monster.y) < md*md) haz='scribble';
+  }
+  if(haz){
+    if(s.pow.invuln>0){ /* protected */ }
+    else if(s.pow.shield>0){ s.pow.shield=0; s.pow.invuln=1.2; popShield(s); }
+    else { killSnake(s, null, haz); return; }
+  }
+
   // magnet: vacuum nearby food toward the head
   if(s.pow.magnet>0){
     for(const f of foods){
@@ -573,6 +642,8 @@ function draw(){
 
   // notebook grid
   drawGrid();
+  drawStains();
+  drawHoles();
 
   // arena wall — wobbly red marker circle
   ctx.lineCap='round';
@@ -670,6 +741,8 @@ function draw(){
     ctx.fillStyle=rgba(p.c,1); ctx.fill();
   }
   ctx.globalAlpha=1;
+
+  drawMonster();   // on top of the snakes so it always reads as a threat
 
   ctx.restore();
   drawEdges();
@@ -795,6 +868,66 @@ function drawGrid(){
   for(let y=Math.floor(y0/G)*G; y<y1; y+=G){ let f=1;
     for(let x=x0; x<=x1; x+=step){ const yy=y+wob(x,y); f?(ctx.moveTo(x,yy),f=0):ctx.lineTo(x,yy); } }
   ctx.stroke();
+}
+
+// ---------- hazard rendering ----------
+function drawStains(){
+  for(const st of stains){
+    if(!inView(st.x,st.y,st.r+30)) continue;
+    ctx.save(); ctx.translate(st.x,st.y);
+    ctx.beginPath();
+    for(let i=0;i<=30;i++){
+      const a=i/30*6.2832;
+      const rr=st.r*(0.9+Math.sin(a*3+st.seed)*0.08+Math.sin(a*5+st.seed*2)*0.05);
+      const x=Math.cos(a)*rr, y=Math.sin(a)*rr;
+      i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+    }
+    ctx.closePath();
+    ctx.fillStyle='rgba(150,105,60,0.13)'; ctx.fill();              // damp patch
+    ctx.lineWidth=6; ctx.strokeStyle='rgba(140,95,50,0.30)'; ctx.stroke();  // coffee ring
+    ctx.restore();
+  }
+}
+function drawHoles(){
+  for(const ho of holes){
+    if(!inView(ho.x,ho.y,ho.r+30)) continue;
+    ctx.save(); ctx.translate(ho.x,ho.y);
+    ctx.beginPath();
+    ho.pts.forEach((p,i)=> i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+    ctx.closePath();
+    ctx.fillStyle='rgba(43,36,26,0.84)'; ctx.fill();                 // desk showing through
+    ctx.lineWidth=2.5; ctx.strokeStyle='rgba(255,250,236,0.75)'; ctx.stroke();  // torn rim
+    ctx.restore();
+  }
+}
+function drawMonster(){
+  const m=monster;
+  if(!m || !inView(m.x,m.y,m.r+50)) return;
+  const t=performance.now()*0.001;
+  ctx.save(); ctx.translate(m.x,m.y); ctx.rotate(t*0.6);
+  ctx.strokeStyle=rgba(INK,0.85); ctx.lineWidth=3; ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.beginPath();
+  for(let i=0;i<46;i++){                       // deterministic chaotic scribble
+    const a=i*2.399, rr=m.r*(0.32+(((i*37)%13)/13)*0.72);
+    const x=Math.cos(a)*rr, y=Math.sin(a)*rr;
+    i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+  }
+  ctx.stroke();
+  ctx.restore();
+  // googly eyes (kept upright so it reads as a creature)
+  for(const sgn of [-1,1]){
+    const ex=m.x+sgn*m.r*0.3, ey=m.y-m.r*0.08;
+    ctx.beginPath(); ctx.arc(ex,ey,m.r*0.21,0,6.2832); ctx.fillStyle='#fff'; ctx.fill();
+    ctx.lineWidth=2.2; ctx.strokeStyle=rgba(INK,0.9); ctx.stroke();
+    ctx.beginPath(); ctx.arc(ex+Math.cos(m.dir)*m.r*0.07, ey+Math.sin(m.dir)*m.r*0.07, m.r*0.1, 0,6.2832);
+    ctx.fillStyle='#2b2620'; ctx.fill();
+  }
+  if(camera.zoom>0.34){
+    ctx.font="700 14px 'Chalkboard SE','Comic Sans MS',cursive"; ctx.textAlign='center';
+    ctx.lineWidth=3; ctx.strokeStyle='rgba(246,239,221,0.9)';
+    ctx.strokeText('THE SCRIBBLE', m.x, m.y - m.r - 12);
+    ctx.fillStyle='#c0563f'; ctx.fillText('THE SCRIBBLE', m.x, m.y - m.r - 12);
+  }
 }
 
 // paints a snake body (outline + crayon fill + skin pattern + shine + scales) onto any context,
@@ -991,6 +1124,7 @@ function tick(now){
   if(!running){ return; }
   const dt=Math.min(0.05,(now-lastT)/1000)||0.016; lastT=now;
 
+  updateMonster(dt);
   for(const s of snakes) updateSnake(s, dt);
   collisions();
 
@@ -1070,7 +1204,21 @@ function startGame(){
   const nm=(document.getElementById('name').value||'').trim().slice(0,12) || 'YOU';
   snakes=[]; foods=[]; particles=[]; trails=[]; corpses=[]; rings=[]; feed=[]; powerups=[];
   shake=0; deathT=null;
+  makeStains(); makeHoles(); makeMonster();
   player=makeSnake(true, nm, COLORS[mySkin.color], 0, mySkin.pattern);
+  // don't drop the player on top of a hazard
+  for(let tries=0; tries<25; tries++){
+    let bad=false;
+    for(const ho of holes) if(dist2(player.x,player.y,ho.x,ho.y) < (ho.r+120)*(ho.r+120)) bad=true;
+    if(monster && dist2(player.x,player.y,monster.x,monster.y) < 420*420) bad=true;
+    if(!bad) break;
+    const a=rnd(0,6.28), R=rnd(300, WORLD*0.7);
+    player.x=Math.cos(a)*R; player.y=Math.sin(a)*R;
+    for(let k=0;k<player.pts.length;k++){
+      player.pts[k].x=player.x-Math.cos(player.dir)*k*SEG_SPACE;
+      player.pts[k].y=player.y-Math.sin(player.dir)*k*SEG_SPACE;
+    }
+  }
   snakes.push(player);
   for(let i=0;i<BOT_COUNT;i++){
     // spawn already-grown to a realistic spread (skewed small, occasional "veteran")
