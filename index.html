@@ -13,7 +13,7 @@
   .overlay {
     position:absolute; inset:0; display:flex; flex-direction:column;
     align-items:center; justify-content:center; text-align:center;
-    color:#2b2620; z-index:10; padding:24px;
+    color:#2b2620; z-index:10; padding:24px; overflow-y:auto;
   }
   #start    { background:radial-gradient(circle at 50% 42%, rgba(246,239,221,0.30), rgba(244,236,216,0.80)); }
   #gameover { background:radial-gradient(circle at 50% 45%, rgba(246,239,221,0.72), rgba(244,236,216,0.90)); }
@@ -55,6 +55,24 @@
   .how { color:#5a5346; font-size:15px; line-height:1.9; margin-top:28px; max-width:430px; }
   .how b { color:#c0563f; font-weight:700; }
 
+  /* ---- skin picker ---- */
+  .skin { display:flex; flex-direction:column; align-items:center; gap:10px; margin:0 0 22px; }
+  #skinPrev { display:block; }
+  .swatches, .pats { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; max-width:340px; }
+  .sw {
+    width:26px; height:26px; padding:0; cursor:pointer; border:3px solid #2b2620; border-radius:50%;
+    box-shadow:2px 2px 0 rgba(43,38,32,0.18); transition:transform .08s;
+  }
+  .sw:hover { transform:scale(1.14) rotate(-6deg); }
+  .sw.on { outline:3px solid #c0563f; outline-offset:2px; }
+  .pat {
+    font-family:inherit; font-size:14px; font-weight:700; color:#5a5346; background:#fffdf6;
+    border:2.5px solid #2b2620; border-radius:200px 12px 220px 12px/12px 220px 12px 200px;
+    padding:6px 15px; cursor:pointer; box-shadow:2px 2px 0 rgba(43,38,32,0.16); transition:transform .08s;
+  }
+  .pat:hover { transform:translate(-1px,-1px) rotate(-1deg); }
+  .pat.on { background:#ffd84d; color:#2b2620; }
+
   /* ---- HUD ---- */
   #hud { position:absolute; inset:0; z-index:5; pointer-events:none; color:#2b2620; }
   #score {
@@ -94,6 +112,11 @@
   <h1>DOODLE&nbsp;SNAKE</h1>
   <div class="tag">~ scribble · munch · survive ~</div>
   <input id="name" maxlength="12" placeholder="YOUR NAME" autocomplete="off" spellcheck="false">
+  <div class="skin">
+    <canvas id="skinPrev"></canvas>
+    <div class="swatches" id="colorRow"></div>
+    <div class="pats" id="patRow"></div>
+  </div>
   <button class="btn" id="playBtn">Play</button>
   <div class="how">
     <b>Eat</b> the colorful orbs to grow longer.<br>
@@ -160,6 +183,15 @@ const COLORS = [
   [70,175,175],[230,120,170],[225,190,70],[120,160,80],[205,90,140]
 ];
 const INK = [43,38,32];
+function shade(c,f){ return [(c[0]*f)|0, (c[1]*f)|0, (c[2]*f)|0]; }
+
+// ---------- snake skins ----------
+const PATTERNS = ['plain','stripes','spots','zigzag','dashes'];
+const PAT_LABEL = {plain:'Plain', stripes:'Stripes', spots:'Spots', zigzag:'Zigzag', dashes:'Dashes'};
+let mySkin = { color:0, pattern:'plain' };
+try{ const sv=JSON.parse(localStorage.getItem('ds_skin')||'null');
+     if(sv && typeof sv.color==='number' && PATTERNS.indexOf(sv.pattern)>=0) mySkin=sv; }catch(e){}
+function saveSkin(){ try{ localStorage.setItem('ds_skin', JSON.stringify(mySkin)); }catch(e){} }
 
 let snakes=[], foods=[], particles=[], trails=[], corpses=[], rings=[], feed=[], powerups=[];
 let shake=0, deathT=null;   // screen shake + short beat before the game-over screen
@@ -280,12 +312,12 @@ function applyPower(s, key){
 }
 
 // ---------- snake ----------
-function makeSnake(isPlayer, name, color, startScore){
+function makeSnake(isPlayer, name, color, startScore, pattern){
   const ang = rnd(0,6.28), R = rnd(300, WORLD*0.7);
   const x = Math.cos(ang)*R, y = Math.sin(ang)*R;
   const sc = startScore||0;                          // bots can spawn already-grown
   const s = {
-    isPlayer, name, c: color,
+    isPlayer, name, c: color, skin: pattern||'plain',
     x, y, dir: rnd(0,6.28), targetDir: 0,
     speed: 2.5, len: 14 + sc*0.9, score: sc,
     pts: [], dead:false,
@@ -765,6 +797,69 @@ function drawGrid(){
   ctx.stroke();
 }
 
+// paints a snake body (outline + crayon fill + skin pattern + shine + scales) onto any context,
+// so the game and the skin-picker preview stay pixel-identical
+function paintBody(g, path, r, c, pattern){
+  const trace=(dx,dy)=>{ g.beginPath(); g.moveTo(path[0].x+(dx||0),path[0].y+(dy||0));
+    for(let i=1;i<path.length;i++) g.lineTo(path[i].x+(dx||0),path[i].y+(dy||0)); };
+  const norm=(i)=>{ const a=Math.atan2(path[i+1].y-path[i-1].y, path[i+1].x-path[i-1].x);
+    return {a, nx:-Math.sin(a), ny:Math.cos(a), tx:Math.cos(a), ty:Math.sin(a)}; };
+  g.lineCap='round'; g.lineJoin='round';
+
+  // sketchy ink outline: same shape stroked a few times with tiny offsets -> rough hand-inked edge
+  g.strokeStyle=rgba(INK,0.55); g.lineWidth=r*2+5;
+  trace(0,0); g.stroke(); trace(1.0,0.8); g.stroke(); trace(-0.9,0.6); g.stroke();
+  // crayon body
+  trace(0,0); g.strokeStyle=rgba(c,1); g.lineWidth=r*2; g.stroke();
+
+  // ---- skin pattern (drawn in a darker shade of the snake's own colour) ----
+  const pc=shade(c,0.6);
+  if(pattern==='stripes'){
+    g.strokeStyle=rgba(pc,0.95); g.lineWidth=r*0.6; g.lineCap='butt';
+    for(let i=4;i<path.length-2;i+=7){
+      const n=norm(i);
+      g.beginPath(); g.moveTo(path[i].x-n.nx*r, path[i].y-n.ny*r);
+      g.lineTo(path[i].x+n.nx*r, path[i].y+n.ny*r); g.stroke();
+    }
+    g.lineCap='round';
+  } else if(pattern==='spots'){
+    g.fillStyle=rgba(pc,0.95);
+    for(let i=6;i<path.length-2;i+=9){
+      const n=norm(i), side=(((i/9)|0)%2)?1:-1;
+      g.beginPath(); g.arc(path[i].x+n.nx*side*r*0.34, path[i].y+n.ny*side*r*0.34, r*0.4, 0, 6.2832);
+      g.fill();
+    }
+  } else if(pattern==='zigzag'){
+    g.strokeStyle=rgba(pc,0.95); g.lineWidth=r*0.36;
+    g.beginPath(); let first=true;
+    for(let i=2;i<path.length-2;i+=3){
+      const n=norm(i), side=(((i/3)|0)%2)?1:-1;
+      const x=path[i].x+n.nx*side*r*0.52, y=path[i].y+n.ny*side*r*0.52;
+      first?(g.moveTo(x,y),first=false):g.lineTo(x,y);
+    }
+    g.stroke();
+  } else if(pattern==='dashes'){
+    trace(0,0); g.setLineDash([r*1.2, r*1.2]); g.strokeStyle=rgba(pc,0.95);
+    g.lineWidth=r*1.55; g.stroke(); g.setLineDash([]);
+  }
+
+  // top-light shine (offset up-left like a drawn highlight)
+  trace(-0.7,-0.9); g.strokeStyle='rgba(255,255,255,0.16)'; g.lineWidth=r*0.8; g.stroke();
+
+  // drawn belly scales — skip where the pattern already gives the body its cross-marks
+  if(pattern==='plain'||pattern==='spots'||pattern==='zigzag'){
+    g.strokeStyle=rgba(INK,0.30); g.lineWidth=1.5;
+    const w=r*0.82;
+    for(let i=5;i<path.length-2;i+=4){
+      const n=norm(i);
+      g.beginPath();
+      g.moveTo(path[i].x-n.nx*w, path[i].y-n.ny*w);
+      g.quadraticCurveTo(path[i].x+n.tx*3.5, path[i].y+n.ty*3.5, path[i].x+n.nx*w, path[i].y+n.ny*w);
+      g.stroke();
+    }
+  }
+}
+
 function drawSnake(s){
   const r=radiusOf(s);
   const pts=s.pts;
@@ -779,30 +874,7 @@ function drawSnake(s){
     const p=pts[i];
     path.push({ x:p.x+Math.sin(p.y*0.045+p.x*0.012)*2.7, y:p.y+Math.cos(p.x*0.045+p.y*0.012)*2.7 });
   }
-  const trace=(dx,dy)=>{ ctx.beginPath(); ctx.moveTo(path[0].x+(dx||0),path[0].y+(dy||0));
-    for(let i=1;i<path.length;i++) ctx.lineTo(path[i].x+(dx||0),path[i].y+(dy||0)); };
-
-  // sketchy ink outline: same shape stroked a few times with tiny offsets -> rough hand-inked edge
-  ctx.strokeStyle=rgba(INK,0.55); ctx.lineWidth=r*2+5;
-  trace(0,0); ctx.stroke();
-  trace(1.0,0.8); ctx.stroke();
-  trace(-0.9,0.6); ctx.stroke();
-  // crayon body
-  trace(0,0); ctx.strokeStyle=rgba(c,1); ctx.lineWidth=r*2; ctx.stroke();
-  // top-light shine (offset up-left like a drawn highlight)
-  trace(-0.7,-0.9); ctx.strokeStyle='rgba(255,255,255,0.16)'; ctx.lineWidth=r*0.8; ctx.stroke();
-
-  // drawn belly scales — little curved cross-ticks down the body
-  ctx.strokeStyle=rgba(INK,0.30); ctx.lineWidth=1.5;
-  const w=r*0.82;
-  for(let i=5;i<path.length-2;i+=4){
-    const a=Math.atan2(path[i+1].y-path[i-1].y, path[i+1].x-path[i-1].x);
-    const nx=-Math.sin(a), ny=Math.cos(a), tx=Math.cos(a), ty=Math.sin(a);
-    ctx.beginPath();
-    ctx.moveTo(path[i].x-nx*w, path[i].y-ny*w);
-    ctx.quadraticCurveTo(path[i].x+tx*3.5, path[i].y+ty*3.5, path[i].x+nx*w, path[i].y+ny*w);
-    ctx.stroke();
-  }
+  paintBody(ctx, path, r, c, s.skin);
 
   // head
   const h=path[0];
@@ -964,7 +1036,7 @@ function tick(now){
   // respawn dead bots to keep arena full
   for(let i=0;i<snakes.length;i++){
     if(snakes[i].dead && !snakes[i].isPlayer){
-      snakes[i]=makeSnake(false, randomName(), COLORS[(Math.random()*COLORS.length)|0]);
+      snakes[i]=makeSnake(false, randomName(), COLORS[(Math.random()*COLORS.length)|0], 0, pick(PATTERNS));
       if(Math.random()<0.4) pushFeed(esc(snakes[i].name)+' joined', 'join');
     }
   }
@@ -998,13 +1070,13 @@ function startGame(){
   const nm=(document.getElementById('name').value||'').trim().slice(0,12) || 'YOU';
   snakes=[]; foods=[]; particles=[]; trails=[]; corpses=[]; rings=[]; feed=[]; powerups=[];
   shake=0; deathT=null;
-  player=makeSnake(true, nm, COLORS[0]);
+  player=makeSnake(true, nm, COLORS[mySkin.color], 0, mySkin.pattern);
   snakes.push(player);
   for(let i=0;i<BOT_COUNT;i++){
     // spawn already-grown to a realistic spread (skewed small, occasional "veteran")
     let sc = Math.floor(Math.pow(Math.random(),1.8)*150);
     if(Math.random()<0.15) sc += Math.floor(Math.random()*250);
-    snakes.push(makeSnake(false, randomName(), COLORS[(i+1)%COLORS.length], sc));
+    snakes.push(makeSnake(false, randomName(), COLORS[(i+1)%COLORS.length], sc, pick(PATTERNS)));
   }
   fillFood();
   fillPowerups();
@@ -1034,6 +1106,53 @@ function toMenu(){
   hud.classList.add('hidden');
   document.getElementById('start').classList.remove('hidden');
 }
+// ---------- skin picker ----------
+function renderSkinPreview(){
+  const cvp=document.getElementById('skinPrev'); if(!cvp) return;
+  const PW=290, PH=76, D=Math.min(window.devicePixelRatio||1,2);
+  cvp.width=PW*D; cvp.height=PH*D; cvp.style.width=PW+'px'; cvp.style.height=PH+'px';
+  const g=cvp.getContext('2d'); g.setTransform(D,0,0,D,0,0); g.clearRect(0,0,PW,PH);
+  // a wavy sample snake, head on the right
+  const path=[], n=64;
+  for(let i=0;i<n;i++){
+    const t=i/(n-1);
+    path.push({ x:PW-20 - t*(PW-44), y:PH/2 + Math.sin(t*5.6)*12 });
+  }
+  const c=COLORS[mySkin.color], r=11;
+  paintBody(g, path, r, c, mySkin.pattern);
+  // head + googly eyes
+  const h=path[0], dir=Math.atan2(h.y-path[1].y, h.x-path[1].x), hr=r*1.25;
+  g.strokeStyle=rgba(INK,0.55); g.lineWidth=2.4;
+  for(const o of [[0,0],[1,0.8],[-0.8,0.7]]){ g.beginPath(); g.arc(h.x+o[0],h.y+o[1],hr,0,6.2832); g.stroke(); }
+  g.beginPath(); g.arc(h.x,h.y,hr,0,6.2832); g.fillStyle=rgba(c,1); g.fill();
+  const ex=Math.cos(dir), ey=Math.sin(dir), px=-ey, py=ex;
+  for(const sgn of [-1,1]){
+    const exx=h.x+ex*r*0.3+px*sgn*r*0.62, eyy=h.y+ey*r*0.3+py*sgn*r*0.62;
+    g.beginPath(); g.arc(exx,eyy,r*0.5,0,6.2832); g.fillStyle='#fff'; g.fill();
+    g.lineWidth=1.8; g.strokeStyle=rgba(INK,0.9); g.stroke();
+    g.beginPath(); g.arc(exx+ex*r*0.22,eyy+ey*r*0.22,r*0.24,0,6.2832); g.fillStyle='#2b2620'; g.fill();
+  }
+}
+function buildSkinUI(){
+  const cr=document.getElementById('colorRow'), pr=document.getElementById('patRow');
+  if(!cr||!pr) return;
+  cr.innerHTML=''; pr.innerHTML='';
+  COLORS.forEach((c,i)=>{
+    const b=document.createElement('button');
+    b.className='sw'+(i===mySkin.color?' on':''); b.style.background=rgba(c,1);
+    b.title='colour'; b.type='button';
+    b.addEventListener('click',()=>{ mySkin.color=i; saveSkin(); buildSkinUI(); renderSkinPreview(); });
+    cr.appendChild(b);
+  });
+  PATTERNS.forEach(p=>{
+    const b=document.createElement('button');
+    b.className='pat'+(p===mySkin.pattern?' on':''); b.textContent=PAT_LABEL[p]; b.type='button';
+    b.addEventListener('click',()=>{ mySkin.pattern=p; saveSkin(); buildSkinUI(); renderSkinPreview(); });
+    pr.appendChild(b);
+  });
+}
+buildSkinUI(); renderSkinPreview();
+
 document.getElementById('playBtn').addEventListener('click', startGame);
 document.getElementById('againBtn').addEventListener('click', startGame);
 document.getElementById('menuBtn').addEventListener('click', toMenu);
