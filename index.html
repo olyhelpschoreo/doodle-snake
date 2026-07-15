@@ -159,7 +159,7 @@ window.addEventListener('resize', resize); resize(); buildPaper();
 // ---------- world ----------
 const WORLD = 4200;            // arena radius
 const FOOD_COUNT = 900;
-const BOT_COUNT = 16;
+const BOT_COUNT = 19;
 const SEG_SPACE = 3.4;         // distance the path advances per stored point group
 
 // ---------- fake-player names (messy handles like real .io lobbies) ----------
@@ -435,7 +435,8 @@ function makeSnake(isPlayer, name, color, startScore, pattern){
     pts: [], dead:false,
     boost:false, boostFuel:1, chat:null,
     pow:{rocket:0, shield:0, magnet:0, invuln:1.8},   // brief spawn protection
-    ai:{ state:'food', t:0, wander:rnd(0,6.28) }
+    // personality: aggr = how willing to hunt, skill = how sharply it dodges
+    ai:{ state:'food', t:0, wander:rnd(0,6.28), aggr:rnd(0,1), skill:rnd(0.55,1) }
   };
   // lay the full body so a big spawn LOOKS big right away (not a short stub that grows)
   const nseg = Math.max(60, Math.floor(s.len*2)+10);
@@ -502,62 +503,101 @@ cv.addEventListener('touchmove',e=>{ const t=e.touches[0]; mouse.x=t.clientX; mo
 window.addEventListener('touchend',()=>{ boosting=false; });
 
 // ---------- AI ----------
+// Priority brain: dodge > flee bigger > hunt smaller > grab power-up > best food > wander.
+// Each bot has a personality (aggr/skill) so they don't all play the same way.
 function steerAI(s, dt){
   const a=s.ai; a.t-=dt;
-  const r = radiusOf(s);
-  // sense nearest threat (other snake bodies near head) and nearest food
-  let bestFood=null, bf=1e9;
-  const senseR2 = 520*520;
-  for(let i=0;i<foods.length;i++){
-    const f=foods[i]; const d=dist2(s.x,s.y,f.x,f.y);
-    if(d<bf && d<senseR2){ bf=d; bestFood=f; }
-  }
-  // threat avoidance: look ahead, if a body is close, turn away
-  let avoid=null, av=1e9;
-  const ahead=170;
+  const r=radiusOf(s);
+  let desired=null;
+  s.boost=false;
+
+  // 1. don't run into a body — look ahead and SWERVE AROUND it (not straight back,
+  //    which a snake can't physically turn into)
+  const ahead = 120 + r*6 + (s.boost?90:0);
   const hx=s.x+Math.cos(s.dir)*ahead, hy=s.y+Math.sin(s.dir)*ahead;
-  for(let k=0;k<snakes.length;k++){
-    const o=snakes[k]; if(o===s||o.dead) continue;
-    const op=o.pts; const st=Math.max(1,(op.length/24)|0);
+  const dangerR = 150 + r*3;
+  let avoid=null, av=1e9;
+  for(const o of snakes){
+    if(o===s||o.dead) continue;
+    const op=o.pts, st=Math.max(1,(op.length/20)|0);
     for(let i=0;i<op.length;i+=st){
       const d=dist2(hx,hy,op[i].x,op[i].y);
-      if(d<av && d< 230*230){ av=d; avoid=op[i]; }
+      if(d<av && d<dangerR*dangerR){ av=d; avoid=op[i]; }
     }
   }
-  let desired=s.dir;
   if(avoid){
-    const aw=Math.atan2(s.y-avoid.y, s.x-avoid.x);
-    desired=aw;
-    // sometimes try to cut in front of the player (aggression)
-  } else if(bestFood){
-    desired=Math.atan2(bestFood.y-s.y, bestFood.x-s.x);
-    // occasionally hunt the player by aiming ahead of them
-    if(player && !player.dead && Math.random()<0.012){
-      const pd=dist2(s.x,s.y,player.x,player.y);
-      if(pd< 700*700){
-        const lead=120;
-        desired=Math.atan2(player.y+Math.sin(player.dir)*lead - s.y, player.x+Math.cos(player.dir)*lead - s.x);
-      }
+    const away=Math.atan2(s.y-avoid.y, s.x-avoid.x);
+    let diff=away-s.dir; while(diff>Math.PI)diff-=6.283; while(diff<-Math.PI)diff+=6.283;
+    desired = s.dir + (diff>0?1:-1)*1.35*a.skill;          // sidestep
+    if(av < 120*120 && s.boostFuel>0.3) s.boost=true;      // panic dash
+  }
+
+  // 2. a much bigger snake's head is close -> get out of there
+  if(desired===null){
+    for(const o of snakes){
+      if(o===s||o.dead || o.len < s.len*1.3) continue;
+      const fleeR=250+r*3;
+      if(dist2(s.x,s.y,o.x,o.y) < fleeR*fleeR){ desired=Math.atan2(s.y-o.y, s.x-o.x); break; }
     }
-  } else {
+  }
+
+  // 3. hunt: cut a smaller snake off by aiming AHEAD of it (only bolder bots bother,
+  //    and nobody wastes time farming tiny ones — that keeps fresh spawns playable)
+  if(desired===null && a.aggr>0.45){
+    const range=520*a.aggr+220;
+    let prey=null, pd=1e9;
+    for(const o of snakes){
+      if(o===s||o.dead) continue;
+      if(o.len > s.len*0.85 || o.len < 25) continue;
+      const d=dist2(s.x,s.y,o.x,o.y);
+      if(d<pd && d<range*range){ pd=d; prey=o; }
+    }
+    if(prey){
+      const lead = 90 + Math.sqrt(pd)*0.35;
+      desired=Math.atan2(prey.y+Math.sin(prey.dir)*lead - s.y, prey.x+Math.cos(prey.dir)*lead - s.x);
+      if(pd < 280*280 && s.boostFuel>0.45 && s.len>30) s.boost=true;   // commit to the cut-off
+    }
+  }
+
+  // 4. power-ups are worth a detour
+  if(desired===null){
+    let bp=null, bpd=1e9;
+    for(const pu of powerups){
+      const d=dist2(s.x,s.y,pu.x,pu.y);
+      if(d<bpd && d<620*620){ bpd=d; bp=pu; }
+    }
+    if(bp) desired=Math.atan2(bp.y-s.y, bp.x-s.x);
+  }
+
+  // 5. food — weigh value against distance instead of blindly taking the nearest crumb
+  if(desired===null){
+    let best=null, bestScore=0;
+    for(let i=0;i<foods.length;i++){
+      const f=foods[i];
+      const d=dist2(s.x,s.y,f.x,f.y);
+      if(d>620*620) continue;
+      const sc=f.val/(Math.sqrt(d)+40);
+      if(sc>bestScore){ bestScore=sc; best=f; }
+    }
+    if(best) desired=Math.atan2(best.y-s.y, best.x-s.x);
+  }
+
+  // 6. nothing interesting — wander
+  if(desired===null){
     if(a.t<=0){ a.wander+=rnd(-0.8,0.8); a.t=rnd(0.6,1.6); }
     desired=a.wander;
   }
-  // dodge the notebook hazards (holes + the Scribble beat food-seeking)
+
+  // hazards + wall override everything
   for(const ho of holes){
     if(dist2(s.x,s.y,ho.x,ho.y) < (ho.r+150)*(ho.r+150)){ desired=Math.atan2(s.y-ho.y, s.x-ho.x); break; }
   }
   if(monster && dist2(s.x,s.y,monster.x,monster.y) < (monster.r+190)*(monster.r+190)){
     desired=Math.atan2(s.y-monster.y, s.x-monster.x);
   }
-  // wall avoidance
-  const distC=Math.hypot(s.x,s.y);
-  if(distC > WORLD-260){
-    desired=Math.atan2(-s.y,-s.x);
-  }
+  if(Math.hypot(s.x,s.y) > WORLD-260) desired=Math.atan2(-s.y,-s.x);
+
   s.targetDir=desired;
-  // boost sometimes when chasing or fleeing
-  s.boost = (avoid && av<150*150 && s.boostFuel>0.25) || (s.score>40 && Math.random()<0.004 && s.boostFuel>0.5);
 }
 
 // ---------- update ----------
