@@ -618,7 +618,7 @@ function updateSnake(s, dt){
       const dx=mouse.x-W/2, dy=mouse.y-H/2;
       if(dx*dx+dy*dy>64) s.targetDir=Math.atan2(dy,dx);   // ignore tiny cursor jitter near centre
     }
-    s.boost = boosting && s.len>16 && s.boostFuel>0.04;
+    s.boost = boosting && s.boostFuel>0.04;   // dash is limited by fuel, not a length gate
   } else {
     steerAI(s, dt);
   }
