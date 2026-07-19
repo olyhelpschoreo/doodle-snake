@@ -56,8 +56,9 @@
   .how b { color:#c0563f; font-weight:700; }
 
   /* ---- skin picker ---- */
-  .skin { display:flex; flex-direction:column; align-items:center; gap:10px; margin:0 0 22px; }
+  .skin { display:flex; flex-direction:column; align-items:center; gap:8px; margin:0 0 22px; }
   #skinPrev { display:block; }
+  .skinlbl { font-size:11px; font-weight:700; color:#9a9080; letter-spacing:1.5px; text-transform:uppercase; margin-top:4px; }
   .swatches, .pats { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; max-width:340px; }
   .sw {
     width:26px; height:26px; padding:0; cursor:pointer; border:3px solid #2b2620; border-radius:50%;
@@ -114,7 +115,10 @@
   <input id="name" maxlength="12" placeholder="YOUR NAME" autocomplete="off" spellcheck="false">
   <div class="skin">
     <canvas id="skinPrev"></canvas>
+    <div class="skinlbl">Body colour</div>
     <div class="swatches" id="colorRow"></div>
+    <div class="skinlbl">Pattern colour</div>
+    <div class="swatches" id="colorRow2"></div>
     <div class="pats" id="patRow"></div>
     <div class="pats"><button class="pat" id="sndBtn" type="button">🔊 Sound On</button></div>
   </div>
@@ -191,9 +195,12 @@ function shade(c,f){ return [(c[0]*f)|0, (c[1]*f)|0, (c[2]*f)|0]; }
 // ---------- snake skins ----------
 const PATTERNS = ['plain','stripes','spots','zigzag','dashes'];
 const PAT_LABEL = {plain:'Plain', stripes:'Stripes', spots:'Spots', zigzag:'Zigzag', dashes:'Dashes'};
-let mySkin = { color:0, pattern:'plain' };
+let mySkin = { color:0, color2:3, pattern:'plain' };
 try{ const sv=JSON.parse(localStorage.getItem('ds_skin')||'null');
-     if(sv && typeof sv.color==='number' && PATTERNS.indexOf(sv.pattern)>=0) mySkin=sv; }catch(e){}
+     if(sv && typeof sv.color==='number' && PATTERNS.indexOf(sv.pattern)>=0){
+       mySkin.color=sv.color; mySkin.pattern=sv.pattern;
+       if(typeof sv.color2==='number' && COLORS[sv.color2]) mySkin.color2=sv.color2;
+     } }catch(e){}
 function saveSkin(){ try{ localStorage.setItem('ds_skin', JSON.stringify(mySkin)); }catch(e){} }
 
 let snakes=[], foods=[], particles=[], trails=[], corpses=[], rings=[], feed=[], powerups=[];
@@ -424,12 +431,12 @@ function applyPower(s, key){
 }
 
 // ---------- snake ----------
-function makeSnake(isPlayer, name, color, startScore, pattern){
+function makeSnake(isPlayer, name, color, startScore, pattern, color2){
   const ang = rnd(0,6.28), R = rnd(300, WORLD*0.7);
   const x = Math.cos(ang)*R, y = Math.sin(ang)*R;
   const sc = startScore||0;                          // bots can spawn already-grown
   const s = {
-    isPlayer, name, c: color, skin: pattern||'plain',
+    isPlayer, name, c: color, c2: color2||shade(color,0.6), skin: pattern||'plain',
     x, y, dir: rnd(0,6.28), targetDir: 0,
     speed: 2.5, len: 14 + sc*0.9, score: sc,
     pts: [], dead:false,
@@ -1052,7 +1059,7 @@ function drawMonster(){
 
 // paints a snake body (outline + crayon fill + skin pattern + shine + scales) onto any context,
 // so the game and the skin-picker preview stay pixel-identical
-function paintBody(g, path, r, c, pattern){
+function paintBody(g, path, r, c, pattern, pcol){
   const trace=(dx,dy)=>{ g.beginPath(); g.moveTo(path[0].x+(dx||0),path[0].y+(dy||0));
     for(let i=1;i<path.length;i++) g.lineTo(path[i].x+(dx||0),path[i].y+(dy||0)); };
   const norm=(i)=>{ const a=Math.atan2(path[i+1].y-path[i-1].y, path[i+1].x-path[i-1].x);
@@ -1066,7 +1073,7 @@ function paintBody(g, path, r, c, pattern){
   trace(0,0); g.strokeStyle=rgba(c,1); g.lineWidth=r*2; g.stroke();
 
   // ---- skin pattern (drawn in a darker shade of the snake's own colour) ----
-  const pc=shade(c,0.6);
+  const pc=pcol||shade(c,0.6);
   if(pattern==='stripes'){
     g.strokeStyle=rgba(pc,0.95); g.lineWidth=r*0.6; g.lineCap='butt';
     for(let i=4;i<path.length-2;i+=7){
@@ -1127,7 +1134,7 @@ function drawSnake(s){
     const p=pts[i];
     path.push({ x:p.x+Math.sin(p.y*0.045+p.x*0.012)*2.7, y:p.y+Math.cos(p.x*0.045+p.y*0.012)*2.7 });
   }
-  paintBody(ctx, path, r, c, s.skin);
+  paintBody(ctx, path, r, c, s.skin, s.c2);
 
   // head
   const h=path[0];
@@ -1291,7 +1298,7 @@ function tick(now){
   // respawn dead bots to keep arena full
   for(let i=0;i<snakes.length;i++){
     if(snakes[i].dead && !snakes[i].isPlayer){
-      snakes[i]=makeSnake(false, randomName(), COLORS[(Math.random()*COLORS.length)|0], 0, pick(PATTERNS));
+      snakes[i]=makeSnake(false, randomName(), COLORS[(Math.random()*COLORS.length)|0], 0, pick(PATTERNS), COLORS[(Math.random()*COLORS.length)|0]);
       if(Math.random()<0.4) pushFeed(esc(snakes[i].name)+' joined', 'join');
     }
   }
@@ -1326,7 +1333,7 @@ function startGame(){
   snakes=[]; foods=[]; particles=[]; trails=[]; corpses=[]; rings=[]; feed=[]; powerups=[];
   shake=0; deathT=null;
   makeStains(); makeHoles(); makeMonster();
-  player=makeSnake(true, nm, COLORS[mySkin.color], 0, mySkin.pattern);
+  player=makeSnake(true, nm, COLORS[mySkin.color], 0, mySkin.pattern, COLORS[mySkin.color2]);
   // don't drop the player on top of a hazard
   for(let tries=0; tries<25; tries++){
     let bad=false;
@@ -1345,7 +1352,7 @@ function startGame(){
     // spawn already-grown to a realistic spread (skewed small, occasional "veteran")
     let sc = Math.floor(Math.pow(Math.random(),1.8)*150);
     if(Math.random()<0.15) sc += Math.floor(Math.random()*250);
-    snakes.push(makeSnake(false, randomName(), COLORS[(i+1)%COLORS.length], sc, pick(PATTERNS)));
+    snakes.push(makeSnake(false, randomName(), COLORS[(i+1)%COLORS.length], sc, pick(PATTERNS), COLORS[(Math.random()*COLORS.length)|0]));
   }
   fillFood();
   fillPowerups();
@@ -1388,7 +1395,7 @@ function renderSkinPreview(){
     path.push({ x:PW-20 - t*(PW-44), y:PH/2 + Math.sin(t*5.6)*12 });
   }
   const c=COLORS[mySkin.color], r=11;
-  paintBody(g, path, r, c, mySkin.pattern);
+  paintBody(g, path, r, c, mySkin.pattern, COLORS[mySkin.color2]);
   // head + googly eyes
   const h=path[0], dir=Math.atan2(h.y-path[1].y, h.x-path[1].x), hr=r*1.25;
   g.strokeStyle=rgba(INK,0.55); g.lineWidth=2.4;
@@ -1403,16 +1410,20 @@ function renderSkinPreview(){
   }
 }
 function buildSkinUI(){
-  const cr=document.getElementById('colorRow'), pr=document.getElementById('patRow');
-  if(!cr||!pr) return;
-  cr.innerHTML=''; pr.innerHTML='';
-  COLORS.forEach((c,i)=>{
-    const b=document.createElement('button');
-    b.className='sw'+(i===mySkin.color?' on':''); b.style.background=rgba(c,1);
-    b.title='colour'; b.type='button';
-    b.addEventListener('click',()=>{ audioResume(); SFX.click(); mySkin.color=i; saveSkin(); buildSkinUI(); renderSkinPreview(); });
-    cr.appendChild(b);
-  });
+  const cr=document.getElementById('colorRow'), cr2=document.getElementById('colorRow2'), pr=document.getElementById('patRow');
+  if(!cr||!cr2||!pr) return;
+  const mkRow=(row, selected, setter)=>{
+    row.innerHTML='';
+    COLORS.forEach((c,i)=>{
+      const b=document.createElement('button');
+      b.className='sw'+(i===selected?' on':''); b.style.background=rgba(c,1); b.type='button';
+      b.addEventListener('click',()=>{ audioResume(); SFX.click(); setter(i); saveSkin(); buildSkinUI(); renderSkinPreview(); });
+      row.appendChild(b);
+    });
+  };
+  mkRow(cr,  mySkin.color,  i=>mySkin.color=i);
+  mkRow(cr2, mySkin.color2, i=>mySkin.color2=i);
+  pr.innerHTML='';
   PATTERNS.forEach(p=>{
     const b=document.createElement('button');
     b.className='pat'+(p===mySkin.pattern?' on':''); b.textContent=PAT_LABEL[p]; b.type='button';
